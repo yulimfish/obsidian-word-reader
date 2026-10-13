@@ -324,6 +324,141 @@ void test("reads EMF record offsets relative to a nonzero source byteOffset", ()
   assert.deepEqual(records[1].payload, Uint8Array.from([1, 2, 3, 4]));
 });
 
+void test("preserves declared object-table size for WMF standard and placeable headers", () => {
+  const drawingRecords = [{ type: 0x7fff, payload: Uint8Array.from([0xaa, 0xbb]) }];
+  for (const placeable of [false, true]) {
+    const noSlots = parseMetafileRecords(
+      createSyntheticWmfFixture(drawingRecords, { placeable, objectCount: 0 }),
+      "wmf",
+    );
+    const oneSlot = parseMetafileRecords(
+      createSyntheticWmfFixture(drawingRecords, { placeable, objectCount: 1 }),
+      "wmf",
+    );
+
+    assert.deepEqual(noSlots.records, oneSlot.records);
+    assert.equal(noSlots.declaredObjectTableSize, 0);
+    assert.equal(oneSlot.declaredObjectTableSize, 1);
+  }
+});
+
+void test("preserves the raw EMF handle-table size including its reserved slot", () => {
+  const drawingRecords = [{ type: 0x7fffffff, payload: Uint8Array.from([1, 2, 3, 4]) }];
+  const oneHandle = parseMetafileRecords(
+    createSyntheticEmfFixture(drawingRecords, { handleCount: 1 }),
+    "emf",
+  );
+  const twoHandles = parseMetafileRecords(
+    createSyntheticEmfFixture(drawingRecords, { handleCount: 2 }),
+    "emf",
+  );
+
+  assert.deepEqual(oneHandle.records.slice(1), twoHandles.records.slice(1));
+  assert.equal(oneHandle.declaredObjectTableSize, 1);
+  assert.equal(twoHandles.declaredObjectTableSize, 2);
+});
+
+void test("preserves a frozen snapshot of default and custom effective limits", () => {
+  const inputs = [
+    {
+      bytes: createSyntheticWmfFixture([], { objectCount: 0 }),
+      format: "wmf" as const,
+    },
+    {
+      bytes: createSyntheticEmfFixture([], { handleCount: 1 }),
+      format: "emf" as const,
+    },
+  ];
+
+  for (const { bytes, format } of inputs) {
+    const defaultSet = parseMetafileRecords(bytes, format);
+    assert.deepEqual(defaultSet.limits, DEFAULT_METAFILE_LIMITS);
+    assert.notEqual(defaultSet.limits, DEFAULT_METAFILE_LIMITS);
+    assert.equal(Object.isFrozen(defaultSet.limits), true);
+    assert.equal(Object.isFrozen(defaultSet), true);
+
+    const callerLimits = {
+      maxBytes: 1024,
+      maxRecords: 10,
+      maxObjects: 0,
+      maxStack: 0,
+      maxSceneOps: 0,
+    };
+    const originalLimits = { ...callerLimits };
+    const customSet = parseMetafileRecords(bytes, format, callerLimits);
+    const otherCustomSet = parseMetafileRecords(bytes, format, {
+      maxBytes: 2048,
+      maxRecords: 12,
+      maxObjects: 3,
+      maxStack: 4,
+      maxSceneOps: 8,
+    });
+
+    assert.deepEqual(customSet.records, otherCustomSet.records);
+    assert.notDeepEqual(customSet, otherCustomSet);
+    assert.deepEqual(customSet.limits, originalLimits);
+    assert.notEqual(customSet.limits, callerLimits);
+    assert.equal(Object.isFrozen(customSet.limits), true);
+
+    callerLimits.maxBytes = 0;
+    callerLimits.maxRecords = 0;
+    callerLimits.maxObjects = 1;
+    callerLimits.maxStack = 0;
+    callerLimits.maxSceneOps = 0;
+    assert.deepEqual(customSet.limits, originalLimits);
+  }
+});
+
+void test("reads each caller limit getter once before validation", () => {
+  const bytes = createSyntheticWmfFixture([], { objectCount: 0 });
+  const reads = {
+    maxBytes: 0,
+    maxRecords: 0,
+    maxObjects: 0,
+    maxStack: 0,
+    maxSceneOps: 0,
+  };
+  const limits = {
+    get maxBytes() {
+      reads.maxBytes += 1;
+      return reads.maxBytes === 1 ? 1024 : 0;
+    },
+    get maxRecords() {
+      reads.maxRecords += 1;
+      return reads.maxRecords === 1 ? 10 : 0;
+    },
+    get maxObjects() {
+      reads.maxObjects += 1;
+      return reads.maxObjects === 1 ? 0 : -1;
+    },
+    get maxStack() {
+      reads.maxStack += 1;
+      return reads.maxStack === 1 ? 2 : -1;
+    },
+    get maxSceneOps() {
+      reads.maxSceneOps += 1;
+      return reads.maxSceneOps === 1 ? 6 : -1;
+    },
+  };
+
+  const recordSet = parseMetafileRecords(bytes, "wmf", limits);
+
+  assert.deepEqual(reads, {
+    maxBytes: 1,
+    maxRecords: 1,
+    maxObjects: 1,
+    maxStack: 1,
+    maxSceneOps: 1,
+  });
+  assert.deepEqual(recordSet.limits, {
+    maxBytes: 1024,
+    maxRecords: 10,
+    maxObjects: 0,
+    maxStack: 2,
+    maxSceneOps: 6,
+  });
+});
+
 void test("bounds object references against declared WMF and EMF handle tables", () => {
   for (const type of [0x12d, 0x1f0]) {
     const wmfValid = createSyntheticWmfFixture(

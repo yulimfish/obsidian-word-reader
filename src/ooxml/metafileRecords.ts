@@ -24,6 +24,8 @@ export interface MetafileRecordSet {
   readonly format: "wmf" | "emf";
   readonly bounds: MetafileBounds | null;
   readonly records: readonly MetafileRecord[];
+  readonly declaredObjectTableSize: number;
+  readonly limits: Readonly<MetafileLimits>;
 }
 
 export type MetafileParseErrorCode =
@@ -93,12 +95,19 @@ export function parseMetafileRecords(
 }
 
 function validateLimits(limits: MetafileLimits): ValidatedLimits {
+  const snapshot = {
+    maxBytes: limits.maxBytes,
+    maxRecords: limits.maxRecords,
+    maxObjects: limits.maxObjects,
+    maxStack: limits.maxStack,
+    maxSceneOps: limits.maxSceneOps,
+  };
   const entries: ReadonlyArray<[keyof MetafileLimits, number]> = [
-    ["maxBytes", limits.maxBytes],
-    ["maxRecords", limits.maxRecords],
-    ["maxObjects", limits.maxObjects],
-    ["maxStack", limits.maxStack],
-    ["maxSceneOps", limits.maxSceneOps],
+    ["maxBytes", snapshot.maxBytes],
+    ["maxRecords", snapshot.maxRecords],
+    ["maxObjects", snapshot.maxObjects],
+    ["maxStack", snapshot.maxStack],
+    ["maxSceneOps", snapshot.maxSceneOps],
   ];
   for (const [name, value] of entries) {
     if (!Number.isSafeInteger(value) || value < 0) {
@@ -108,13 +117,7 @@ function validateLimits(limits: MetafileLimits): ValidatedLimits {
       );
     }
   }
-  return {
-    maxBytes: limits.maxBytes,
-    maxRecords: limits.maxRecords,
-    maxObjects: limits.maxObjects,
-    maxStack: limits.maxStack,
-    maxSceneOps: limits.maxSceneOps,
-  };
+  return Object.freeze(snapshot);
 }
 
 function parseWmfRecords(
@@ -220,7 +223,7 @@ function parseWmfRecords(
   if (!foundEof) {
     throw new MetafileParseError("missing-eof", "WMF has no terminal EOF record.");
   }
-  return createRecordSet("wmf", bounds, records);
+  return createRecordSet("wmf", bounds, records, objectCount, limits);
 }
 
 function readPlaceableBounds(view: DataView): MetafileBounds {
@@ -368,7 +371,7 @@ function parseEmfRecords(
       "EMF declared record count does not match the framed records.",
     );
   }
-  return createRecordSet("emf", bounds, records);
+  return createRecordSet("emf", bounds, records, handleCount, limits);
 }
 
 function validateEmfEofRecord(
@@ -484,11 +487,15 @@ function createRecordSet(
   format: "wmf" | "emf",
   bounds: MetafileBounds | null,
   records: MetafileRecord[],
+  declaredObjectTableSize: number,
+  limits: ValidatedLimits,
 ): MetafileRecordSet {
   return Object.freeze({
     format,
     bounds,
     records: Object.freeze(records),
+    declaredObjectTableSize,
+    limits,
   });
 }
 
