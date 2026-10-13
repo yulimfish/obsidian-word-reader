@@ -1,7 +1,6 @@
 import type JSZip from "jszip";
 
 import {
-  attribute,
   descendantsNamed,
   namespacedAttribute,
   numberAttribute,
@@ -15,7 +14,6 @@ import {
 } from "./zipLimits";
 import {
   enforceOoxmlPackagePolicy,
-  OoxmlPolicyError,
 } from "../ooxml/packagePolicy";
 import { loadOoxmlZip } from "../ooxml/jszipReader";
 import {
@@ -23,6 +21,8 @@ import {
   type PptxSlideMetadata,
 } from "./pptxMetadata";
 import { LruCache } from "../reader/lruCache";
+import { collectValidatedPptxImagePaths, isCanonicalPreviewPath, readOoxmlPreviewMetadata, type OoxmlPreviewMetadata } from "../ooxml/equationPreviews";
+import type { PreviewInventory } from "../ooxml/previewTypes";
 
 const DEFAULT_SLIDE_WIDTH = 12_192_000;
 const DEFAULT_SLIDE_HEIGHT = 6_858_000;
@@ -33,6 +33,12 @@ const RELATIONSHIP_CACHE_CAPACITY = 64;
 const SLIDE_CONTEXT_CACHE_CAPACITY = 12;
 const BINARY_CACHE_CAPACITY = 24;
 const MAX_METADATA_CONCURRENCY = 4;
+
+// Module-private storage preserves the read boundary without ES2018 private-field helpers.
+const readBoundaries = new WeakMap<PptxPackage, {
+  images: ReadonlySet<string>;
+  metadata: OoxmlPreviewMetadata;
+}>();
 
 export interface PptxRelationship {
   id: string;
@@ -103,6 +109,7 @@ export class PptxPackage {
   readonly slideHeight: number;
   readonly slidePaths: string[];
   readonly zipSummary: ZipSafetySummary;
+  readonly previewInventory: PreviewInventory | null;
 
   private readonly xmlCache =
     new LruCache<string, Promise<Document>>(XML_CACHE_CAPACITY);
@@ -124,6 +131,9 @@ export class PptxPackage {
     presentation: Document,
     presentationRelationships: Map<string, PptxRelationship>,
     zipSummary: ZipSafetySummary,
+    previewInventory: PreviewInventory | null,
+    imagePaths: ReadonlySet<string>,
+    metadata: OoxmlPreviewMetadata,
   ) {
     const slideSize = descendantsNamed(
       presentation.documentElement,
@@ -163,6 +173,8 @@ export class PptxPackage {
         resolvePackagePath("ppt/presentation.xml", relationship.target),
       );
     this.zipSummary = zipSummary;
+    this.previewInventory = previewInventory;
+    readBoundaries.set(this, { images: new Set(imagePaths), metadata });
   }
 
   static async load(
@@ -188,28 +200,30 @@ export class PptxPackage {
         "Macro-enabled PowerPoint packages are not supported.",
       );
     }
+    let previewInventory: PreviewInventory | null;
+    let imagePaths: ReadonlySet<string>;
+    let metadata: OoxmlPreviewMetadata;
     try {
-      await enforceOoxmlPackagePolicy(zip, "pptx");
+      previewInventory = await enforceOoxmlPackagePolicy(zip, "pptx", { legacyEquationPreviews: true });
+      imagePaths = await collectValidatedPptxImagePaths(zip, previewInventory);
+      metadata = await readOoxmlPreviewMetadata(zip);
     } catch (error) {
-      if (error instanceof OoxmlPolicyError) {
-        throw new PptxPackageError("unsupported", error.message);
-      }
-      throw error;
+      throw new PptxPackageError("unsupported", getErrorMessage(error));
     }
-    const presentationXml = await readZipText(zip, "ppt/presentation.xml");
+    const presentationXml = await readZipText(zip, "ppt/presentation.xml", metadata.embeddingPaths);
     const presentation = parsePackageXml(
       presentationXml,
       "ppt/presentation.xml",
     );
-    const relationships = await readRelationships(
-      zip,
-      "ppt/presentation.xml",
-    );
+    const relationships = new Map(metadata.relationships.get("ppt/presentation.xml"));
     const pptx = new PptxPackage(
       zip,
       presentation,
       relationships,
       zipSummary,
+      previewInventory,
+      imagePaths,
+      metadata,
     );
     if (pptx.slidePaths.length === 0) {
       throw new PptxPackageError(
@@ -364,6 +378,10 @@ export class PptxPackage {
   }
 
   async getBinary(path: string): Promise<Uint8Array | null> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
+    if (!readBoundaries.get(this)!.images.has(path)) {
+      throw new PptxPackageError("unsupported", "Unvalidated image part.");
+    }
     return this.binaryCache.getOrCreate(path, () => {
       const entry = this.zip.file(path);
       return entry ? entry.async("uint8array") : Promise.resolve(null);
@@ -411,23 +429,26 @@ export class PptxPackage {
   }
 
   private getXml(path: string): Promise<Document> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
     return this.xmlCache.getOrCreate(path, () =>
-      readZipText(this.zip, path).then((xml) =>
+      readZipText(this.zip, path, readBoundaries.get(this)!.metadata.embeddingPaths).then((xml) =>
         parsePackageXml(xml, path),
       ),
     );
   }
 
   private async getOptionalXml(path: string): Promise<Document | null> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
     return this.zip.file(path) ? this.getXml(path) : null;
   }
 
   private getRelationships(
     path: string,
   ): Promise<Map<string, PptxRelationship>> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
     return this.relationshipCache.getOrCreate(
       path,
-      () => readRelationships(this.zip, path),
+      () => Promise.resolve(new Map(readBoundaries.get(this)!.metadata.relationships.get(path))),
     );
   }
 
@@ -514,37 +535,6 @@ function normalizePackagePath(path: string): string {
   return normalized.join("/");
 }
 
-async function readRelationships(
-  zip: JSZip,
-  sourcePath: string,
-): Promise<Map<string, PptxRelationship>> {
-  const path = relationshipPartPath(sourcePath);
-  const entry = zip.file(path);
-  if (!entry) {
-    return new Map();
-  }
-  const document = parsePackageXml(await entry.async("string"), path);
-  const relationships = new Map<string, PptxRelationship>();
-  for (const element of descendantsNamed(
-    document.documentElement,
-    "Relationship",
-  )) {
-    const id = attribute(element, "Id");
-    const type = attribute(element, "Type");
-    const target = attribute(element, "Target");
-    if (!id || !type || !target) {
-      continue;
-    }
-    relationships.set(id, {
-      id,
-      type,
-      target,
-      external: attribute(element, "TargetMode") === "External",
-    });
-  }
-  return relationships;
-}
-
 function findRelationship(
   relationships: Map<string, PptxRelationship>,
   typeSuffix: string,
@@ -563,7 +553,14 @@ function ensureRequiredEntry(zip: JSZip, path: string): void {
   }
 }
 
-async function readZipText(zip: JSZip, path: string): Promise<string> {
+function assertReadablePath(path: string, embeddingPaths: ReadonlySet<string>): void {
+  if (!isCanonicalPreviewPath(path) || /(?:^|\/)(?:embeddings|oleobjects)(?:\/|$)/i.test(path) || embeddingPaths.has(path)) {
+    throw new PptxPackageError("unsupported", "Payload or noncanonical path.");
+  }
+}
+
+async function readZipText(zip: JSZip, path: string, embeddingPaths: ReadonlySet<string>): Promise<string> {
+  assertReadablePath(path, embeddingPaths);
   const entry = zip.file(path);
   if (!entry) {
     throw new PptxPackageError(

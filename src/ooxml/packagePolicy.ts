@@ -1,4 +1,6 @@
 import JSZip from "jszip";
+import { inspectEquationPreviews } from "./equationPreviews";
+import type { PreviewInventory } from "./previewTypes";
 
 export type OoxmlFormat = "docx" | "pptx" | "xlsx";
 
@@ -37,7 +39,9 @@ const SCRIPT_MEDIA_EXTENSIONS = new Set([
 export async function enforceOoxmlPackagePolicy(
   zip: JSZip,
   format: OoxmlFormat,
-): Promise<void> {
+  options?: { legacyEquationPreviews?: boolean },
+): Promise<PreviewInventory | null> {
+  const allowPreviews = format !== "xlsx" && options?.legacyEquationPreviews === true;
   const names = Object.keys(zip.files);
   for (const name of names) {
     const lowerName = name.toLowerCase();
@@ -53,8 +57,8 @@ export async function enforceOoxmlPackagePolicy(
       );
     }
     if (
-      lowerName.includes("/embeddings/") ||
-      lowerName.includes("/oleobjects/")
+      !allowPreviews && (lowerName.includes("/embeddings/") ||
+      lowerName.includes("/oleobjects/"))
     ) {
       throw new OoxmlPolicyError(
         "ole-object",
@@ -75,10 +79,7 @@ export async function enforceOoxmlPackagePolicy(
   }
 
   const contentTypesEntry = zip.file("[Content_Types].xml");
-  if (!contentTypesEntry) {
-    return;
-  }
-  const contentTypes = (await contentTypesEntry.async("string")).toLowerCase();
+  const contentTypes = contentTypesEntry ? (await contentTypesEntry.async("string")).toLowerCase() : "";
   if (
     contentTypes.includes("macroenabled") ||
     contentTypes.includes("vbaproject") ||
@@ -90,12 +91,22 @@ export async function enforceOoxmlPackagePolicy(
     );
   }
   if (
-    contentTypes.includes("oleobject") ||
-    contentTypes.includes("ole-object")
+    !allowPreviews && (contentTypes.includes("oleobject") ||
+    contentTypes.includes("ole-object"))
   ) {
     throw new OoxmlPolicyError(
       "ole-object",
       `Embedded OLE objects are not supported in ${format.toUpperCase()} previews.`,
     );
   }
+  if (format !== "xlsx") {
+    try {
+      const inventory = await inspectEquationPreviews(zip, format);
+      if (allowPreviews) return inventory;
+      if (inventory.occurrences.length) throw new Error("Embedded OLE objects are not supported.");
+    } catch (error) {
+      throw new OoxmlPolicyError("ole-object", error instanceof Error ? error.message : "Invalid equation preview metadata.");
+    }
+  }
+  return null;
 }

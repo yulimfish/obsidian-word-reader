@@ -7,6 +7,7 @@ import {
 } from "docx-preview";
 
 import { annotateDocxHeadingLevels } from "./docxOutline";
+import { validateDocxPackage } from "./DocxAdapter";
 
 const DOCX_RENDER_OPTIONS: Partial<Options> = {
   className: "docx",
@@ -31,6 +32,7 @@ export async function renderDocx(
   buffer: ArrayBuffer,
   targetEl: HTMLElement,
 ): Promise<void> {
+  await validateDocxPackage(buffer);
   const document: unknown = await parseAsync(buffer, DOCX_RENDER_OPTIONS);
   annotateDocxHeadingLevels(document);
   await renderDocument(
