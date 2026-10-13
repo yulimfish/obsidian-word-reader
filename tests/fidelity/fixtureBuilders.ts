@@ -10,6 +10,151 @@ const ALTERNATIVE_NAMESPACE =
   "http://schemas.microsoft.com/office/drawing/2010/main";
 const FIXED_ZIP_DATE = new Date(Date.UTC(2000, 0, 1, 0, 0, 0));
 
+export interface SyntheticMetafileRecord {
+  type: number;
+  payload?: Uint8Array;
+}
+
+export function createSyntheticWmfFixture(
+  records: readonly SyntheticMetafileRecord[],
+  options: {
+    placeable?: boolean;
+    objectCount?: number;
+    appendEof?: boolean;
+  } = {},
+): Uint8Array {
+  const recordBytes = records.map(encodeWmfRecord);
+  if (options.appendEof !== false) {
+    recordBytes.push(encodeWmfRecord({ type: 0 }));
+  }
+
+  const placeableSize = options.placeable ? 22 : 0;
+  const standardSize = 18 + recordBytes.reduce((total, record) => total + record.byteLength, 0);
+  const bytes = new Uint8Array(placeableSize + standardSize);
+  if (options.placeable) {
+    writePlaceableHeader(bytes);
+  }
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const standardOffset = placeableSize;
+  view.setUint16(standardOffset, 1, true);
+  view.setUint16(standardOffset + 2, 9, true);
+  view.setUint16(standardOffset + 4, 0x0300, true);
+  view.setUint32(standardOffset + 6, standardSize / 2, true);
+  view.setUint16(standardOffset + 10, options.objectCount ?? 0, true);
+  view.setUint32(
+    standardOffset + 12,
+    Math.max(3, ...recordBytes.map((record) => record.byteLength / 2)),
+    true,
+  );
+  view.setUint16(standardOffset + 16, 0, true);
+
+  let offset = standardOffset + 18;
+  for (const record of recordBytes) {
+    bytes.set(record, offset);
+    offset += record.byteLength;
+  }
+  return bytes;
+}
+
+export function createSyntheticEmfFixture(
+  records: readonly SyntheticMetafileRecord[],
+  options: {
+    handleCount?: number;
+    appendEof?: boolean;
+    eofPaletteEntries?: Uint8Array;
+  } = {},
+): Uint8Array {
+  const recordBytes = records.map(encodeEmfRecord);
+  const eofPaletteCount =
+    options.appendEof === false ? 0 : (options.eofPaletteEntries?.byteLength ?? 0) / 4;
+  if (options.appendEof !== false) {
+    recordBytes.push(encodeEmfEofRecord(options.eofPaletteEntries));
+  }
+
+  const headerSize = 88;
+  const bytes = new Uint8Array(
+    headerSize + recordBytes.reduce((total, record) => total + record.byteLength, 0),
+  );
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(0, 1, true);
+  view.setUint32(4, headerSize, true);
+  view.setInt32(8, 0, true);
+  view.setInt32(12, 0, true);
+  view.setInt32(16, 100, true);
+  view.setInt32(20, 80, true);
+  view.setUint32(40, 0x464d4520, true);
+  view.setUint32(44, 0x00010000, true);
+  view.setUint32(48, bytes.byteLength, true);
+  view.setUint32(52, recordBytes.length + 1, true);
+  view.setUint16(56, options.handleCount ?? 1, true);
+  view.setUint16(58, 0, true);
+  view.setUint32(68, eofPaletteCount, true);
+
+  let offset = headerSize;
+  for (const record of recordBytes) {
+    bytes.set(record, offset);
+    offset += record.byteLength;
+  }
+  return bytes;
+}
+
+function encodeEmfEofRecord(paletteEntries: Uint8Array = new Uint8Array()): Uint8Array {
+  if (paletteEntries.byteLength % 4 !== 0) {
+    throw new Error("Synthetic EMF palette entries must be four-byte records.");
+  }
+  const size = 20 + paletteEntries.byteLength;
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(0, 14, true);
+  view.setUint32(4, size, true);
+  view.setUint32(8, paletteEntries.byteLength / 4, true);
+  view.setUint32(12, paletteEntries.byteLength === 0 ? 0 : 16, true);
+  bytes.set(paletteEntries, 16);
+  view.setUint32(size - 4, size, true);
+  return bytes;
+}
+
+function encodeWmfRecord(record: SyntheticMetafileRecord): Uint8Array {
+  const payload = record.payload ?? new Uint8Array();
+  const size = 6 + payload.byteLength + (payload.byteLength % 2);
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(0, size / 2, true);
+  view.setUint16(4, record.type, true);
+  bytes.set(payload, 6);
+  return bytes;
+}
+
+function encodeEmfRecord(record: SyntheticMetafileRecord): Uint8Array {
+  const payload = record.payload ?? new Uint8Array();
+  const size = Math.ceil((8 + payload.byteLength) / 4) * 4;
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(0, record.type, true);
+  view.setUint32(4, size, true);
+  bytes.set(payload, 8);
+  return bytes;
+}
+
+function writePlaceableHeader(bytes: Uint8Array): void {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  view.setUint32(0, 0x9ac6cdd7, true);
+  view.setUint16(4, 0, true);
+  view.setInt16(6, 0, true);
+  view.setInt16(8, 0, true);
+  view.setInt16(10, 100, true);
+  view.setInt16(12, 80, true);
+  view.setUint16(14, 1440, true);
+  view.setUint32(16, 0, true);
+
+  let checksum = 0;
+  for (let offset = 0; offset < 20; offset += 2) {
+    checksum ^= view.getUint16(offset, true);
+  }
+  view.setUint16(20, checksum, true);
+}
+
 export interface EquationFixtureOptions {
   progId: "Equation.3" | "Equation.DSMT4";
   previewRelationship: {
