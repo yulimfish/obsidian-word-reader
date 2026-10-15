@@ -89,6 +89,12 @@ interface MetafileTextStyle {
   readonly backgroundColor?: MetafileColor;
   readonly clipRect?: MetafileViewBox;
   readonly opaqueRect?: MetafileViewBox;
+  readonly fontMetadata?: {
+    readonly fullName: string;
+    readonly style: string;
+    readonly styleSize: number;
+    readonly panose: readonly number[];
+  };
 }
 
 // A font-specific byte run is NOT Unicode text. Consumers must resolve the
@@ -98,6 +104,14 @@ export type MetafileTextOperation = MetafileTextStyle & (
   | { readonly text: null; readonly encoding: "font-specific"; readonly sourceBytes: readonly number[]; readonly codePage: 42 }
 );
 
+// Persistent device-space clip expression. Rectangles capture the logical-to-
+// device transform at selection; offsets are device vectors, not translations
+// of the drawing world transform. null denotes the default unbounded clip.
+export type MetafileClipRegion =
+  | { readonly kind: "rectangles"; readonly rectangles: readonly MetafileViewBox[]; readonly transform: MetafileTransform }
+  | { readonly kind: "combine"; readonly mode: "intersect" | "union" | "xor" | "exclude"; readonly left: MetafileClipRegion | null; readonly right: MetafileClipRegion }
+  | { readonly kind: "offset"; readonly region: MetafileClipRegion; readonly x: number; readonly y: number };
+
 export type MetafileClipOperation =
   | {
       readonly kind: "clip";
@@ -105,7 +119,8 @@ export type MetafileClipOperation =
       readonly commands: readonly MetafilePathCommand[];
       readonly fillRule: "evenOdd" | "nonZero";
     }
-  | { readonly kind: "clip"; readonly action: "reset" };
+  | { readonly kind: "clip"; readonly action: "reset" }
+  | { readonly kind: "clip"; readonly action: "region"; readonly region: MetafileClipRegion | null };
 
 export type MetafileSceneOperation =
   | MetafilePathOperation
@@ -113,6 +128,7 @@ export type MetafileSceneOperation =
   | MetafileClipOperation;
 
 export type MetafileSceneWarning =
+  | { readonly kind: "group-metadata"; readonly action: "begin" | "end"; readonly depth: number; readonly rectangle?: MetafileViewBox; readonly description?: string; readonly recordOffset: number; readonly recordType: number }
   | { readonly kind: "missing-font"; readonly fontName: string }
   | { readonly kind: "unconfirmed-font"; readonly fontName: string }
   | { readonly kind: "font-metrics-required"; readonly fontName: string; readonly recordOffset: number; readonly recordType: number }
