@@ -328,3 +328,23 @@ This is a bounded public declaration/man-page finding, not a runtime result, gat
 - **Disposition:** No runtime use was performed and no gate was closed. Exact VZ-URL-to-backing-object/APFS mapping and continuous writer-excluding custody remain unmet.
 
 **W66 checkpoint-time G0 handoff (before W67 review):** G0 remains **BLOCKED / NO-GO**. W65 is completed documentary evidence only. Remaining independent blockers are (1) exact backing-object/APFS mapping and continuous writer-excluding custody, (2) the independent VA1/VA5 guest-process, parent/direct-child, completion, and write oracle, and (3) VA3 enforceable resource caps. No Build or operational authorization follows. VA1–VA8, VH1–VH7, the architecture, trust boundary, and proposed resource values are unchanged. W67 independent two-pass review is the next action; no commit has been made or is pending before that review. This status is a checkpoint, not a future-state claim.
+
+### W70 bounded SDK 27.0 VM and serial declarations (2026-10-25)
+
+W70 completed a bounded read of these selected SDK 27.0 public declarations: `Virtualization.framework/Headers/VZVirtualMachine.h:1–346`; `VZVirtualMachineDelegate.h:1–51`; `VZVirtioConsoleDevice.h:1–72`; `VZFileSerialPortAttachment.h:1–48`; and `VZFileHandleSerialPortAttachment.h:1–47`. This records declaration comments only; no runtime test or operation was performed.
+
+- **VM lifecycle:** `VZVirtualMachine.h:23–56,124–163,215–254,335–342` describes VM-level state/start/stop operations and VM stop/error callbacks; `VZVirtualMachineDelegate.h:15–34` likewise describes VM delegate events. These are not workload-process results.
+- **Console:** `VZVirtioConsoleDevice.h:17–45` describes a guest process opening or closing a console port, but identifies only the console device/port and supplies no process identity or result. The approved configuration explicitly requires `consoleDevices=[]` (Spec §5, lines 85–89), so this is not an allowed observation path.
+- **Serial:** `VZFileSerialPortAttachment.h:12–44` sends guest bytes one-way to a host file; `VZFileHandleSerialPortAttachment.h:12–43` provides bidirectional data. Neither declaration associates those bytes with a guest PID, lineage, exit status or process-write attribution.
+
+**Bounded conclusion:** Within these exact declarations, W70 found no workload PID/PPID, parent-child relation, process exit/completion result, process inspection/debugging API, or guest-agent contract. This does not prove universal API absence. Guest/serial bytes remain untrusted under Spec lines 79–81 and 97–109; no independent oracle is established. This adds no VA1/VA5 evidence sufficient to satisfy either gate. It supplements rather than repeats W4/W9/W42; their prior findings remain preserved.
+
+**W70 checkpoint disposition (historical):** G0 remained **BLOCKED / NO-GO**. W70 is completed bounded documentary research and does not satisfy the VA1/VA5 independent workload-process oracle, exact VZ-to-backing/APFS identity and custody, or VA3 enforceable resource caps. No acceptance/trust/architecture criteria changed; no Build or operation was authorized. Future work should use this finding rather than repeat W4/W9/W42, and must not treat serial bytes, console callbacks or marker persistence as a process oracle.
+
+### W72 independent review disposition and checkpoint-time G0 handoff
+
+W72 completed an independent review of W71's W70 evidence and current handoff. Pass 1: **PASS (0 BLOCKER / 0 MAJOR / 0 MINOR)**. Pass 2: **PASS (0/0/0)**. W72 reported no findings and no direct regressions.
+
+This review confirms documentation fidelity only. It does not close VA1/VA5 or any other G0 gate and does not authorize Build or operations.
+
+**Checkpoint-time G0 disposition:** G0 remains **BLOCKED / NO-GO**. The independent guest workload PID/parent-child/completion/write oracle; exact VZ backing-object/APFS identity and continuous writer-excluding custody; and enforceable VA3 host caps remain unresolved. All original acceptance criteria, the fully untrusted guest trust boundary, and the selected architecture are unchanged. The Plan-only checkpoint may proceed under the earlier phase-commit authorization; this review does not authorize Build or operations.
