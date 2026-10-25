@@ -1,4 +1,5 @@
 import { Platform } from "obsidian";
+import type { DocxEngineNodeRuntime } from "./docx/docxEngineLoader";
 
 export interface ElectronNativeImage {
   isEmpty?(): boolean;
@@ -50,6 +51,22 @@ export function getElectronModule(): ElectronModule {
 export function getFileSystemPromises(): FileSystemPromises {
   assertDesktop();
   return module.require("node:fs/promises") as FileSystemPromises;
+}
+
+export function getDocxEngineNodeRuntime(): DocxEngineNodeRuntime {
+  assertDesktop();
+  const fs = module.require("node:fs/promises") as DocxEngineNodeRuntime["fs"];
+  const path = module.require("node:path") as DocxEngineNodeRuntime["path"];
+  const crypto = module.require("node:crypto") as DocxEngineNodeRuntime["crypto"];
+  return {
+    fs,
+    path,
+    crypto,
+    moduleRequire: (canonicalVerifiedChild) => {
+      assertDesktop();
+      return module.require(canonicalVerifiedChild) as unknown;
+    },
+  };
 }
 
 function assertDesktop(): void {
