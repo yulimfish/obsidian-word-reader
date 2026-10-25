@@ -13,13 +13,57 @@ const fidelityReporterSource = `import { Transform } from "node:stream";
 export default class FidelityTestSummaryReporter extends Transform {
   constructor() {
     super({ writableObjectMode: true });
+    this.summaryFiles = new Map();
+    this.fallbackFiles = new Map();
+    this.currentFile = null;
+  }
+
+  record(map, file) {
+    if (!file) return null;
+    let entry = map.get(file);
+    if (!entry) {
+      entry = { passed: 0, failed: 0, todo: 0 };
+      map.set(file, entry);
+    }
+    return entry;
   }
 
   _transform(event, _encoding, callback) {
-    if (event.type === "test:summary" && event.data.file) {
-      const counts = event.data.counts;
-      const executed = counts.passed + counts.failed + counts.todo;
-      this.push(JSON.stringify({ file: event.data.file, executed }) + "\\n");
+    const data = event.data || {};
+    if (event.type === "test:start") {
+      if (data.file) this.currentFile = data.file;
+      this.record(this.fallbackFiles, this.currentFile);
+    } else if (event.type === "test:pass") {
+      const entry = this.record(this.fallbackFiles, data.file || this.currentFile);
+      if (entry && !data.skip) {
+        if (data.todo) entry.todo += 1;
+        else entry.passed += 1;
+      }
+    } else if (event.type === "test:fail") {
+      const entry = this.record(this.fallbackFiles, data.file || this.currentFile);
+      if (entry) entry.failed += 1;
+    } else if (event.type === "test:summary" && data.file && data.counts) {
+      const key = this.fallbackFiles.has(data.file)
+        ? data.file
+        : (this.currentFile || data.file);
+      this.summaryFiles.set(key, {
+        passed: data.counts.passed,
+        failed: data.counts.failed,
+        todo: data.counts.todo,
+      });
+    }
+    callback();
+  }
+
+  _flush(callback) {
+    const files = new Set([
+      ...this.summaryFiles.keys(),
+      ...this.fallbackFiles.keys(),
+    ]);
+    for (const file of files) {
+      const entry = this.summaryFiles.get(file) || this.fallbackFiles.get(file);
+      const executed = entry.passed + entry.failed + entry.todo;
+      this.push(JSON.stringify({ file, executed }) + "\\n");
     }
     callback();
   }
