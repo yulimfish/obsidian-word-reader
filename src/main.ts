@@ -76,7 +76,7 @@ declare const __DOCX_ENGINE_BYTES__: number;
 const DOCX_BUILD_EXPECTATION: DocxEngineBuildExpectation = {
   pluginId: "word-reader",
   pluginVersion: typeof __DOCX_PLUGIN_VERSION__ === "undefined"
-    ? "3.5.0"
+    ? "3.6.0"
     : __DOCX_PLUGIN_VERSION__,
   buildId: typeof __DOCX_BUILD_ID__ === "undefined"
     ? "development"

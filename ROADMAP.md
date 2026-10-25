@@ -1,8 +1,8 @@
 # Office Reader 迭代路线
 
-更新日期：2026-08-09
+更新日期：2026-10-25
 
-当前版本：`3.5.0`
+当前版本：`3.6.0`
 
 当前产品边界：在 Obsidian Desktop 内本地、离线、只读地阅读 `.docx`、
 `.pptx` 和 `.xlsx`。显示名称为 **Office Reader**，插件 ID `word-reader`、
@@ -31,7 +31,8 @@
 | `3.2.0` | 已发布 | XLSX 旧式批注、包内图片、缓存图表预览、条件格式子集、流式分片解析和稠密大表基准 |
 | `3.3.0` | 已发布 | DOCX/PPTX/XLSX 统一性能基线、五次独立进程中位数/P95、机器可读 CI 趋势产物、Desktop 校准表和隐私安全性能诊断 |
 | `3.4.0` | 已发布 | 四组 100 轮跨格式生命周期压力门禁、统一资源所有权、强制 GC 堆趋势、文件代次失效，以及设置/工作区/持续错误恢复矩阵 |
-| `3.5.0` | 当前版本 | DOCX 自适应分批提交、PPTX 可抢占调度、XLSX 串行背压流式解析、统一主线程/内存压力诊断，以及快速 CI 与扩展规模两级大文件门禁 |
+| `3.5.0` | 已发布 | DOCX 自适应分批提交、PPTX 可抢占调度、XLSX 串行背压流式解析、统一主线程/内存压力诊断，以及快速 CI 与扩展规模两级大文件门禁 |
+| `3.6.0` | 当前版本 | 只读 DOCX 引擎 sidecar、DOCX 包净化、双入口构建、JSZip writer route 裁剪、四文件发布包与安装说明 |
 
 版本记录有一项历史不一致：`2.0.0` 已存在于 `CHANGELOG.md`、
 `versions.json` 和本地发布产物中，但当前 Git 历史没有独立的 `2.0.0` 标签，
@@ -157,4 +158,4 @@ PPTX MVP 与 `2.0.1` 修复合并在 `2.0.1` 发布提交中。后续发布不�
 
 发布前还必须核对 `package.json`、`package-lock.json`、`manifest.json`、
 `versions.json`、`CHANGELOG.md`、Git 标签和 release zip 版本一致；发布包只
-包含 `main.js`、`manifest.json` 和 `styles.css`。
+包含 `main.js`、`docx-engine.cjs`、`manifest.json` 和 `styles.css`。

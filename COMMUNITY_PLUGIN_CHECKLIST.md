@@ -22,7 +22,7 @@ Community directory and before publishing later releases.
 - [ ] Run `node scripts/release-check.mjs --tag X.Y.Z`.
 - [ ] Confirm all commands finish without warnings or errors.
 - [ ] Confirm `release/obsidian-word-reader-X.Y.Z.zip` contains only
-  `main.js`, `manifest.json`, and `styles.css`.
+  `main.js`, `docx-engine.cjs`, `manifest.json`, and `styles.css`.
 
 ## Repository metadata
 
@@ -124,9 +124,9 @@ Community directory and before publishing later releases.
 - [ ] Confirm the tag exactly matches `package.json`, `package-lock.json`,
   `manifest.json`, `versions.json`, and the latest `CHANGELOG.md` section.
 - [ ] Confirm the GitHub release has binary attachments named `main.js`,
-  `manifest.json`, and `styles.css`.
-- [ ] Install the release assets into
-  `.obsidian/plugins/word-reader/` and verify that Obsidian loads the
+  `docx-engine.cjs`, `manifest.json`, and `styles.css`.
+- [ ] Install all four release assets into `.obsidian/plugins/word-reader/`,
+  keep `docx-engine.cjs` beside `main.js`, and verify that Obsidian loads the
   plugin without console errors.
 
 ## Initial directory submission
@@ -137,6 +137,8 @@ Community directory and before publishing later releases.
   <https://github.com/qianwei4712/obsidian-word-reader> as a new plugin.
 - [ ] Confirm the directory reads the expected manifest from the default
   branch.
+- [ ] Confirm the community installer delivers `docx-engine.cjs`, or document
+  the release zip as the supported install path for the engine sidecar.
 - [ ] Address automated review feedback in a new patch release rather than
   replacing an existing release.
 

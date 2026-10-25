@@ -114,7 +114,7 @@ if (tagName !== null) {
   expect(tagName === pkg.version, `Git tag ${tagName || "(empty)"} must match package version ${pkg.version}`);
 }
 
-for (const file of ["dist/main.js", "dist/manifest.json", "dist/styles.css"]) {
+for (const file of ["dist/main.js", "dist/docx-engine.cjs", "dist/manifest.json", "dist/styles.css"]) {
   expect(hasFile(file), `${file} must exist after build`);
 }
 
@@ -123,7 +123,7 @@ expect(hasFile(releaseZip), `${releaseZip} must exist after packaging`);
 if (hasFile(releaseZip)) {
   try {
     const actualEntries = readZipEntryNames(releaseZip).sort();
-    const expectedEntries = ["main.js", "manifest.json", "styles.css"].sort();
+    const expectedEntries = ["main.js", "docx-engine.cjs", "manifest.json", "styles.css"].sort();
     expect(
       JSON.stringify(actualEntries) === JSON.stringify(expectedEntries),
       `${releaseZip} must contain only ${expectedEntries.join(", ")}, got ${actualEntries.join(", ")}`,

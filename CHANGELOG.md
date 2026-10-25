@@ -1,5 +1,56 @@
 # Changelog
 
+## 3.6.0 - 2026-10-25
+
+### English
+
+#### Added
+
+- Added a verified read-only DOCX engine sidecar, `docx-engine.cjs`, loaded
+  beside `main.js` and checked against the expected ABI, build ID, size, and
+  SHA-256 before rendering.
+- Added DOCX package sanitization before rendering: OLE/equation preview
+  payloads are removed from the parsed copy while the source file remains
+  unchanged.
+- Added engine-sidecar packaging, release validation, and installation
+  guidance.
+
+#### Changed
+
+- Split the production build into `main.js` and `docx-engine.cjs`; both files
+  are now required in the plugin folder.
+- Hardened the runtime bundle by replacing JSZip writer/deflate modules with
+  hash-bound read-only implementations and rejecting remaining writer-route
+  markers in both emitted bundles.
+
+#### Fixed
+
+- Reduced fidelity-test fixture races when DOCX loader temporary directories
+  are cleaned up concurrently.
+- Refreshed the third-party license inventory for the bundled DOCX runtime.
+
+### 中文
+
+#### 新增
+
+- 新增经过校验的只读 DOCX 引擎 sidecar（`docx-engine.cjs`），与 `main.js`
+  放在同一目录；渲染前校验 ABI、构建 ID、文件大小和 SHA-256。
+- 新增 DOCX 渲染前的文档包净化：从解析副本中移除 OLE/公式预览负载，源文件
+  保持不变。
+- 新增引擎 sidecar 的打包、发布校验和安装说明。
+
+#### 变更
+
+- 生产构建拆分为 `main.js` 和 `docx-engine.cjs`；插件目录现在必须同时包含
+  这两个文件。
+- 通过哈希绑定的只读实现替换 JSZip 写入/压缩模块，并在两个产物中拒绝残留
+  的 writer route 标记，进一步收紧运行时包。
+
+#### 修复
+
+- 减少 DOCX 加载器临时目录并发清理时的 fidelity 测试夹具竞态。
+- 刷新内置 DOCX 运行时相关的第三方许可证清单。
+
 ## 3.5.0 - 2026-08-09
 
 ### English

@@ -95,6 +95,7 @@ jobs:
         with:
           subject-path: |
             dist/main.js
+            dist/docx-engine.cjs
             dist/manifest.json
             dist/styles.css
             release/obsidian-word-reader-${{ steps.package.outputs.version }}.zip
@@ -105,6 +106,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "dist/main.js#main.js" \
+            "dist/docx-engine.cjs#docx-engine.cjs" \
             "dist/manifest.json#manifest.json" \
             "dist/styles.css#styles.css" \
             "release/obsidian-word-reader-${{ steps.package.outputs.version }}.zip#obsidian-word-reader-${{ steps.package.outputs.version }}.zip" \

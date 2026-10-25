@@ -162,7 +162,7 @@ function aggregateSamples(samples) {
 }
 
 function collectArtifactSizes() {
-  const releaseFiles = ["main.js", "manifest.json", "styles.css"];
+  const releaseFiles = ["main.js", "docx-engine.cjs", "manifest.json", "styles.css"];
   const bundlePath = path.join(rootDir, "dist", "main.js");
   if (!fs.existsSync(bundlePath)) {
     throw new Error("dist/main.js does not exist; run the production build first.");

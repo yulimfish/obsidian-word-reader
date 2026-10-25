@@ -7,7 +7,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8
 const distDir = path.join(rootDir, "dist");
 const releaseDir = path.join(rootDir, "release");
 const outputPath = path.join(releaseDir, `${pkg.name}-${pkg.version}.zip`);
-const releaseFiles = ["main.js", "manifest.json", "styles.css"];
+const releaseFiles = ["main.js", "docx-engine.cjs", "manifest.json", "styles.css"];
 
 const crcTable = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {

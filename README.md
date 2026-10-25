@@ -361,16 +361,44 @@ same-name Markdown files are opened without being overwritten.
    YourVault/.obsidian/plugins/word-reader/
    ```
 
-3. Extract the zip into that folder. The files must be directly inside the plugin folder:
+3. Extract the zip into that folder. All four files must be directly inside the plugin folder:
 
    ```text
    YourVault/.obsidian/plugins/word-reader/main.js
+   YourVault/.obsidian/plugins/word-reader/docx-engine.cjs
    YourVault/.obsidian/plugins/word-reader/manifest.json
    YourVault/.obsidian/plugins/word-reader/styles.css
    ```
 
+   `docx-engine.cjs` is the verified DOCX rendering engine. Keep it next to
+   `main.js`; do not rename, move, or delete it.
+
 4. Restart Obsidian or reload community plugins.
 5. In Obsidian, open Settings, enable Community plugins, then enable Office Reader.
+6. Open a `.docx` file to verify the engine loads. If `docx-engine.cjs` is
+   missing or damaged, the plugin shows a load error instead of rendering.
+
+### Install individual release assets
+
+Download all four assets from the same GitHub release (`main.js`,
+`docx-engine.cjs`, `manifest.json`, `styles.css`) and place them directly in
+the plugin folder shown above. Do not mix files from different releases.
+
+> If you install or update through the Obsidian community plugin browser, it
+> may download only `main.js`, `manifest.json`, and `styles.css`. Download
+> `docx-engine.cjs` from the same release and place it beside `main.js`, or use
+> the release zip instead.
+
+### Upgrading from an older release
+
+1. Disable Office Reader in Obsidian.
+2. Replace all four files in the plugin folder with the files from the new
+   release.
+3. Keep `data.json` if it exists.
+4. Re-enable the plugin.
+
+Do not replace only `main.js`; `main.js` and `docx-engine.cjs` must come from
+the same release.
 
 ### Build from source
 
@@ -390,6 +418,7 @@ same-name Markdown files are opened without being overwritten.
 
    ```text
    dist/main.js
+   dist/docx-engine.cjs
    dist/manifest.json
    dist/styles.css
    ```
@@ -415,6 +444,7 @@ The zip root contains only the files Obsidian needs:
 
 ```text
 main.js
+docx-engine.cjs
 manifest.json
 styles.css
 ```
@@ -426,11 +456,11 @@ Release artifacts are ignored by Git and should not be committed.
 GitHub Actions creates a release automatically when a version tag without a `v` prefix is pushed:
 
 ```bash
-git tag 2.5.0
+git tag 3.6.0
 git push origin 2.5.0
 ```
 
-The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 500 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-2.5.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
+The workflow validates that the tag matches `package.json`, `manifest.json`, and `package-lock.json`, checks the 500 KiB bundle budget, builds the plugin, creates `release/obsidian-word-reader-3.6.0.zip`, extracts the matching `CHANGELOG.md` section, and uploads `main.js`, `docx-engine.cjs`, `manifest.json`, `styles.css`, and the zip to the GitHub Release.
 
 ## Development
 

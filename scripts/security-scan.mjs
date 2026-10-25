@@ -5,7 +5,10 @@ import ts from "typescript";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceDir = path.join(rootDir, "src");
-const bundlePath = path.join(rootDir, "dist", "main.js");
+const bundlePaths = [
+  path.join(rootDir, "dist", "main.js"),
+  path.join(rootDir, "dist", "docx-engine.cjs"),
+];
 
 function findSourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -192,14 +195,14 @@ function validateScannerRules() {
   }
 }
 
-function scanBundle() {
+function scanBundle(bundlePath) {
   if (!fs.existsSync(bundlePath)) {
     return [{
       fileName: bundlePath,
       line: 1,
       column: 1,
       rule: "missing-bundle",
-      message: "dist/main.js is missing. Run the production build first.",
+      message: `${path.relative(rootDir, bundlePath)} is missing. Run the production build first.`,
     }];
   }
 
@@ -252,7 +255,7 @@ const sourceFiles = findSourceFiles(sourceDir);
 const findings = sourceFiles.flatMap((fileName) =>
   scanSourceText(fs.readFileSync(fileName, "utf8"), fileName)
 );
-findings.push(...scanBundle());
+findings.push(...bundlePaths.flatMap((bundlePath) => scanBundle(bundlePath)));
 
 if (findings.length > 0) {
   console.error("Security scan failed:");
@@ -267,5 +270,6 @@ if (findings.length > 0) {
 }
 
 console.log(
-  `Security scan passed: ${sourceFiles.length} source files and dist/main.js checked.`,
+  `Security scan passed: ${sourceFiles.length} source files and ` +
+    `${bundlePaths.map((bundlePath) => path.relative(rootDir, bundlePath)).join(", ")} checked.`,
 );

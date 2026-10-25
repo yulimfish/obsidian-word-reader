@@ -140,7 +140,7 @@ read-only spreadsheet session:
   direct user action and confirmation.
 - Cancel stale workbook, worksheet, search, and scheduled grid work during
   reload, sheet/file switching, and view close; clear bounded package caches.
-- Keep `dist/main.js` within 500 KiB and the three-file release archive below
+- Keep `dist/main.js` within 500 KiB and the release archive below
   the 8 MiB 3.0.0 target.
 
 ## 3.1.0 Workbook Navigation and Knowledge Extraction Scope
@@ -206,7 +206,7 @@ XML retention from the large-workbook path:
   navigation, scroll, peak heap, DOM, cache bounds, cancellation, and cleanup.
 - XLSX retains the 3.2.0 first-window, scroll, heap, DOM, dense-parse, and
   streamed-buffer limits. Production `main.js` remains at most `500 KiB`; the
-  three-file release zip remains at most `8 MiB`.
+  release zip remains at most `8 MiB`.
 - CI uploads the full JSON result, a compact trend point, and a Markdown job
   summary. Budget failures identify the format, aggregate, stage/metric,
   observed value, and threshold.
@@ -287,7 +287,7 @@ Run this checklist before publishing a stable release:
   - `npm run dependencies:audit`
   - `npm run security:scan`
   - `npm run release`
-  - Confirm the release zip contains only `main.js`, `manifest.json`, and `styles.css`.
+  - Confirm the release zip contains only `main.js`, `docx-engine.cjs`, `manifest.json`, and `styles.css`.
 - Installation:
   - Install the release zip into a test vault at `.obsidian/plugins/word-reader/`.
   - Enable the plugin from Obsidian Community plugins.
@@ -442,10 +442,11 @@ Run this checklist before publishing a stable release:
   - Confirm changing interface language preserves the current document reading position and outline state.
 - Release automation:
   - Confirm unit and integration tests pass in CI.
-  - Confirm the security scan passes against source and `dist/main.js`.
+  - Confirm the security scan passes against source, `dist/main.js`, and
+    `dist/docx-engine.cjs`.
   - Confirm `node scripts/release-check.mjs --tag X.Y.Z` passes for the release tag.
   - Push an `X.Y.Z` tag in a test release flow.
-  - Confirm GitHub Actions creates a release and uploads `main.js`, `manifest.json`, `styles.css`, and the zip.
+  - Confirm GitHub Actions creates a release and uploads `main.js`, `docx-engine.cjs`, `manifest.json`, `styles.css`, and the zip.
 
 ## Support Boundaries
 
@@ -607,7 +608,7 @@ Not supported:
   后打开安全协议的超链接。
 - 重新加载、切表、切文件和关闭视图时取消过期工作簿、工作表、搜索和计划网格
   任务，并清空有界包缓存。
-- `dist/main.js` 继续不超过 500 KiB，三文件发布包不超过 3.0.0 的 8 MiB 目标。
+- `dist/main.js` 继续不超过 500 KiB，发布包不超过 3.0.0 的 8 MiB 目标。
 
 ### 3.1.0 工作簿导航与知识提取范围
 
