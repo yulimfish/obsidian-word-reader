@@ -271,6 +271,16 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function requireProcessUid(): number {
+  const uid = process.getuid?.();
+  if (uid === undefined) throw new Error("Evidence verification requires a POSIX process uid.");
+  return uid;
+}
+
+function isRuntimeArray(value: unknown): boolean {
+  return Array.isArray(value);
+}
+
 function stableValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stableValue);
   if (value && typeof value === "object") {
@@ -372,7 +382,7 @@ function assertNoDuplicateJsonKeys(source: string): void {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
@@ -423,7 +433,7 @@ export function preparePinnedToolchainMetadata(
       typeof control.canonicalPath !== "string" ||
       path.resolve(control.canonicalPath) !== control.canonicalPath ||
       control.canonicalPath !== path.resolve(control.projectRoot, relativePath) ||
-      path.relative(control.projectRoot, control.canonicalPath).replaceAll("\\", "/") !== relativePath
+      path.relative(control.projectRoot, control.canonicalPath).split("\\").join("/") !== relativePath
     ) throw new Error(`Pinned toolchain control has a noncanonical project-relative identity: ${relativePath}`);
     if (!(control.contents instanceof Uint8Array)) {
       throw new TypeError(`Pinned toolchain control has no raw package bytes: ${relativePath}`);
@@ -461,7 +471,7 @@ export function preparePinnedToolchainMetadata(
   };
 }
 
-function parseMetafile(value: string | unknown): ParsedMetafile {
+function parseMetafile(value: unknown): ParsedMetafile {
   let parsed: unknown = value;
   if (typeof value === "string") {
     assertNoDuplicateJsonKeys(value);
@@ -602,11 +612,11 @@ function freezeBinding(
 
 /** Classify every raw key before calling the physical inspector for any input. */
 export async function bindMetafileInputs(
-  metafileValue: string | unknown,
+  metafileValue: unknown,
   virtualLoads: readonly VirtualLoadRecord[],
   physicalInspector: PhysicalInputInspector,
 ): Promise<readonly BoundMetafileInput[]> {
-  if (!Array.isArray(virtualLoads) || typeof physicalInspector !== "function") {
+  if (!isRuntimeArray(virtualLoads) || typeof physicalInspector !== "function") {
     throw new TypeError("Metafile input binding requires callback records and a physical inspector.");
   }
   const metafile = parseMetafile(metafileValue);
@@ -814,7 +824,7 @@ function makeEvidencePersistence(io: EvidencePersistenceIo): EvidencePersistence
   const verifyDirectory = async (directory: string, mode: number): Promise<EvidenceStatLike> => {
     const stat = await io.lstat(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Evidence path is not a real directory: ${directory}`);
-    if (stat.uid !== process.getuid() || modeOf(stat) !== mode) throw new Error(`Evidence directory owner/mode mismatch: ${directory}`);
+    if (stat.uid !== requireProcessUid() || modeOf(stat) !== mode) throw new Error(`Evidence directory owner/mode mismatch: ${directory}`);
     if (await io.realpath(directory) !== directory) throw new Error(`Evidence directory canonical path mismatch: ${directory}`);
     return stat;
   };
@@ -832,7 +842,7 @@ function makeEvidencePersistence(io: EvidencePersistenceIo): EvidencePersistence
     try { await handle.writeFile(Uint8Array.from(bytes)); }
     finally { await handle.close(); }
     const stat = await io.lstat(absolute);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || modeOf(stat) !== 0o600) {
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== requireProcessUid() || modeOf(stat) !== 0o600) {
       throw new Error(`Evidence file owner/mode/type mismatch: ${relative}`);
     }
   };
@@ -871,7 +881,7 @@ function makeEvidencePersistence(io: EvidencePersistenceIo): EvidencePersistence
     for (const relative of relativePaths) {
       const absolute = path.join(ATTEMPT_3_DIRECTORY, relative);
       const stat = await io.lstat(absolute);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid() || modeOf(stat) !== 0o600) {
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== requireProcessUid() || modeOf(stat) !== 0o600) {
         throw new Error(`Evidence inventory contains an invalid file: ${relative}`);
       }
       const bytes = await io.readFile(absolute);
@@ -883,7 +893,7 @@ function makeEvidencePersistence(io: EvidencePersistenceIo): EvidencePersistence
   return {
     async createChild(): Promise<void> {
       if (childCreated) throw new Error("Attempt-3 evidence child creation was already attempted.");
-      const uid = process.getuid();
+      const uid = requireProcessUid();
       const parent = path.dirname(APPROVED_EVIDENCE_ROOT);
       const parentStat = await io.lstat(parent);
       if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || parentStat.uid !== uid || modeOf(parentStat) !== 0o700) {
@@ -952,7 +962,7 @@ function makeEvidencePersistence(io: EvidencePersistenceIo): EvidencePersistence
         const digest = path.basename(relative, ".bin");
         await writeExclusive(relative, blobs.get(digest)!);
       }
-      for (const name of PRE_GUARD_FILE_NAMES) await writeExclusive(name, payload.files[name]);
+      for (const name of PRE_GUARD_FILE_NAMES) await writeExclusive(name, payload.files[name as keyof EvidencePreGuardFiles]);
       preGuardWritten = true;
     },
 
@@ -1123,7 +1133,7 @@ export function createEvidencePersistenceForTesting(io: EvidencePersistenceIo): 
 }
 
 async function verifyAttempt1Unchanged(): Promise<Readonly<Record<string, string>>> {
-  const uid = process.getuid();
+  const uid = requireProcessUid();
   const stat = await fs.lstat(ATTEMPT_1_DIRECTORY);
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== uid || (stat.mode & 0o777) !== 0o700) {
     throw new Error("Attempt-1 evidence directory is missing or has changed ownership/mode/type.");
@@ -1186,7 +1196,7 @@ export async function verifyAttempt2Unchanged(
   }
 
   const entries = await io.readdir(ATTEMPT_2_DIRECTORY);
-  if (!Array.isArray(entries) || entries.some((entry) => !entry || typeof entry.name !== "string")) {
+  if (!isRuntimeArray(entries) || entries.some((entry) => !entry || typeof entry.name !== "string")) {
     throw new Error("Attempt-2 evidence inventory is malformed.");
   }
   const expectedNames = Object.keys(ATTEMPT_2_HASHES).sort(compareText);
@@ -1354,7 +1364,7 @@ export async function collectControlInputManifest(
       try {
         const stat = await fs.lstat(packageFile);
         if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`Invalid dependency package metadata: ${packageFile}`);
-        nodePackagePaths.add(path.relative(projectRoot, packageFile).replaceAll("\\", "/"));
+        nodePackagePaths.add(path.relative(projectRoot, packageFile).split("\\").join("/"));
         found = true;
       } catch (error) {
         if (typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -1666,8 +1676,8 @@ function validatePersistedEvidenceBindings(
   }
   const bindingContext = payload.bindingContext;
   if (
-    !bindingContext || !Array.isArray(bindingContext.expectedManifest) ||
-    !Array.isArray(bindingContext.compiledInputs) || !Array.isArray(bindingContext.controls)
+    !bindingContext || !isRuntimeArray(bindingContext.expectedManifest) ||
+    !isRuntimeArray(bindingContext.compiledInputs) || !isRuntimeArray(bindingContext.controls)
   ) throw new Error("Schema-2 evidence persistence requires independent expected manifest and pinned rows.");
   const { expectedManifest, compiledInputs, controls } = bindingContext;
   if (controls.length === 0) throw new Error("Schema-2 evidence persistence requires pinned control snapshots.");
@@ -1757,7 +1767,7 @@ export async function bindControlInputs(
   compiledInputs: readonly BoundMetafileInput[],
   inspectRaw: (relativePath: string) => Promise<RawProjectFileSnapshot>,
 ): Promise<readonly BoundControlInput[]> {
-  if (!Array.isArray(compiledInputs) || typeof inspectRaw !== "function") {
+  if (!isRuntimeArray(compiledInputs) || typeof inspectRaw !== "function") {
     throw new TypeError("Control input binding requires compiled rows and a raw snapshot inspector.");
   }
   const specs = validateControlInputManifest(manifest, manifest);
@@ -1828,7 +1838,7 @@ export async function recheckPinnedSnapshots(
   enumerateControls: () => Promise<ControlInputManifest>,
   inspectRaw: (relativePath: string) => Promise<RawProjectFileSnapshot>,
 ): Promise<void> {
-  if (!Array.isArray(compiledInputs) || !Array.isArray(controls) || typeof enumerateControls !== "function" || typeof inspectRaw !== "function") {
+  if (!isRuntimeArray(compiledInputs) || !isRuntimeArray(controls) || typeof enumerateControls !== "function" || typeof inspectRaw !== "function") {
     throw new TypeError("Snapshot recheck requires pinned rows and independent enumeration/raw-inspection callbacks.");
   }
   if (!path.isAbsolute(projectRoot) || path.resolve(projectRoot) !== projectRoot) {
@@ -1849,7 +1859,7 @@ export async function recheckPinnedSnapshots(
 
   const expected = assertPhysicalIdentityIndex(projectRoot, compiledInputs, controls);
   for (const [canonicalPath, snapshot] of expected) {
-    const relativePath = path.relative(projectRoot, canonicalPath).replaceAll("\\", "/");
+    const relativePath = path.relative(projectRoot, canonicalPath).split("\\").join("/");
     const current = await inspectRaw(relativePath);
     if (
       current.projectRoot !== projectRoot || current.canonicalPath !== canonicalPath ||
@@ -1884,9 +1894,9 @@ function normalizeMetaPath(projectRoot: string, value: string): string {
   if (path.isAbsolute(value)) {
     const absolute = path.resolve(value);
     if (absolute !== projectRoot && !isContained(projectRoot, absolute)) throw new Error(`Metafile path escapes project root: ${value}`);
-    return path.relative(projectRoot, absolute).replaceAll("\\", "/");
+    return path.relative(projectRoot, absolute).split("\\").join("/");
   }
-  return value.replaceAll("\\", "/");
+  return value.split("\\").join("/");
 }
 
 function normalizedMetafile(projectRoot: string, metafile: { readonly inputs: Record<string, unknown>; readonly outputs: Record<string, unknown> }): unknown {
@@ -2001,12 +2011,13 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
   const persistence = makeEvidencePersistence(defaultEvidenceIo);
   let childCreated = false;
   let preGuardPersisted = false;
-  let buildFinalReceipt: ((error: ExpectedGuardError) => Buffer) | null = null;
+  const finalReceiptHolder: { build: ((error: ExpectedGuardError) => Buffer) | null } = { build: null };
   try {
     await persistence.createChild();
     childCreated = true;
+    // eslint-disable-next-line no-unsanitized/method -- test-only import of the local build configuration module from the canonical project root
     const { buildDocxDistribution } = await import(pathToFileURL(path.join(projectRoot, "scripts/docx-build-config.mjs")).href) as {
-      buildDocxDistribution(options: Record<string, unknown>): Promise<unknown>;
+      buildDocxDistribution: (options: Record<string, unknown>) => Promise<unknown>;
     };
     let discovery: Record<string, unknown> | null = null;
     const discoveryVirtualEvents: VirtualLoadRecord[] = [];
@@ -2037,6 +2048,12 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
     const buildIdInputs = discoveryRecord.buildIdInputs as Array<{ path: string; sha256: string }>;
     const buildIdConfiguration = discoveryRecord.buildIdConfiguration;
     const version = discoveryRecord.version;
+    if (typeof buildId !== "string" || buildId.length === 0) {
+      throw new Error("Discovery record buildId is missing or not a string.");
+    }
+    if (typeof version !== "string" || version.length === 0) {
+      throw new Error("Discovery record version is missing or not a string.");
+    }
     const discoveryEngine = discoveryRecord.engine as Record<string, unknown>;
     const discoveryMain = discoveryRecord.main as Record<string, unknown>;
     const discoveryMetafiles = {
@@ -2047,7 +2064,7 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
     const canonicalKeys = new Map<string, string>();
     const identities = new Map<string, string>();
     const physicalInspector: PhysicalInputInspector = async (key) => {
-      const existing = [...inspectionCache.values()].find((item) => path.relative(projectRoot, item.canonicalPath).replaceAll("\\", "/") === key);
+      const existing = [...inspectionCache.values()].find((item) => path.relative(projectRoot, item.canonicalPath).split("\\").join("/") === key);
       if (existing) return existing;
       const inspected = await inspectProjectFile(projectRoot, key);
       const previousKey = canonicalKeys.get(inspected.canonicalPath);
@@ -2158,7 +2175,7 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
         if (stableJson(actualKeys) !== stableJson(expectedKeys)) throw new Error(`Authoritative loaded inputs do not exactly cover ${entry} metafile inputs.`);
         if (virtualByEntry.get(entry)?.contents !== initialVirtualByEntry.get(entry)?.contents) throw new Error(`Virtual module bytes changed in ${entry}.`);
       }
-      const pinnedToolchainMetadata = preparePinnedToolchainMetadata(controls, process.version, version as string);
+      const pinnedToolchainMetadata = preparePinnedToolchainMetadata(controls, process.version, version);
       const versions = pinnedToolchainMetadata.versions;
       const preparedEvidenceInputs = prepareEvidenceInputs(mergedInputs, controls, manifestBytes, stylesBytes);
       const inputManifestRows = preparedEvidenceInputs.inputs;
@@ -2237,7 +2254,7 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
         packageLimitsPass: true,
       };
       if (!Object.values(comparisons).every(Boolean)) throw new Error("An authoritative capture comparison did not pass.");
-      buildFinalReceipt = (caughtGuardError) => Buffer.from(`${JSON.stringify({
+      finalReceiptHolder.build = (caughtGuardError) => Buffer.from(`${JSON.stringify({
         schemaVersion: 2,
         workId: "W69",
         attempt: 3,
@@ -2382,8 +2399,8 @@ export async function captureDocxEvidenceAttempt3(): Promise<{
       stack: authoritativeStack,
     };
     await persistence.persistGuardError(caughtGuardError);
-    if (!buildFinalReceipt) throw new Error("Final receipt was not prepared by pre-guard validation.");
-    const finalReceiptBytes = buildFinalReceipt(caughtGuardError);
+    if (!finalReceiptHolder.build) throw new Error("Final receipt was not prepared by pre-guard validation.");
+    const finalReceiptBytes = finalReceiptHolder.build(caughtGuardError);
     await persistence.persistFinalReceipt(finalReceiptBytes, caughtGuardError);
     const beforeComplete = async (): Promise<void> => {
       const afterAttempt1 = await verifyAttempt1Unchanged();

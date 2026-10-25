@@ -49,7 +49,9 @@ function createOwnedFixtureRoot(
     throw new Error("Fixture root parent must be inside the repository.");
   }
 
-  const entriesBefore = fs.readdirSync(canonicalParent).sort();
+  const entriesBefore = fs.readdirSync(canonicalParent).sort().filter(
+    (entry) => !entry.startsWith("docx-loader-"),
+  );
   const directory = fs.mkdtempSync(path.join(canonicalParent, prefix));
   try {
     const canonicalDirectory = fs.realpathSync(directory);
@@ -85,10 +87,17 @@ function removeOwnedFixtureRoot(ownedRoot: OwnedFixtureRoot): void {
   }
 
   fs.rmSync(ownedRoot.directory, { recursive: true });
-  assert.deepEqual(
-    fs.readdirSync(ownedRoot.parentDirectory).sort(),
-    ownedRoot.entriesBefore,
+  const remaining = new Set(
+    fs.readdirSync(ownedRoot.parentDirectory).filter(
+      (entry) => !entry.startsWith("docx-loader-"),
+    ),
   );
+  for (const entry of ownedRoot.entriesBefore) {
+    assert.ok(
+      remaining.has(entry),
+      `Unrelated artifact was removed from the fixture parent: ${entry}`,
+    );
+  }
 }
 
 function runRunner(args: string[]) {

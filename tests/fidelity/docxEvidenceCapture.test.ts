@@ -82,7 +82,6 @@ async function assertMatrixOutcomes(name: string, variants: readonly MatrixVaria
     return { label: variant.label, expected: variant.expected, actual, matched };
   });
   const mismatches = records.filter((record) => !record.matched);
-  console.log(`${name} matrix outcomes:\n${JSON.stringify(records, null, 2)}`);
   assert.equal(
     mismatches.length,
     0,
@@ -275,10 +274,10 @@ void test("capture binding: exact virtual input binds with no physical inspectio
   ] as const;
   for (const [name, expectedHash] of expectedHashes) {
     const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const keyPattern = new RegExp(`[\"']${escapedName}[\"']\\s*:`, "g");
+    const keyPattern = new RegExp(`["']${escapedName}["']\\s*:`, "g");
     assert.equal([...hashesObject[1].matchAll(keyPattern)].length, 1, `${name} should occur exactly once`);
-    const literalPattern = new RegExp(`[\"']${escapedName}[\"']\\s*:\\s*[\"']([0-9a-f]+)[\"']`, "g");
-    const literals = [...hashesObject[1].matchAll(literalPattern)];
+    const literalPattern = new RegExp(`["']${escapedName}["']\\s*:\\s*["']([0-9a-f]+)["']`, "g");
+    const literals: RegExpMatchArray[] = [...hashesObject[1].matchAll(literalPattern)];
     assert.equal(literals.length, 1, `${name} should have exactly one hash literal`);
     assert.equal(literals[0][1], expectedHash);
     assert.match(literals[0][1], /^[0-9a-f]{64}$/);
@@ -1475,7 +1474,7 @@ function fakeEvidenceIo(options: { failOnPath?: string } = {}): EvidencePersiste
   readonly events: string[];
   readonly files: Map<string, Buffer>;
 } {
-  const uid = process.getuid();
+  const uid = process.getuid?.() ?? -1;
   const directories = new Map<string, { uid: number; mode: number }>([
     [EVIDENCE_PARENT, { uid, mode: 0o700 }],
     [EVIDENCE_ROOT, { uid, mode: 0o755 }],
@@ -1643,15 +1642,6 @@ void test("capture binding: persistence failure retains partial files without cl
   const sortedFileEntries = (files: Map<string, Buffer>) =>
     [...files.entries()].sort(([left], [right]) => left.localeCompare(right));
 
-  console.log("persistence failure finalization observations:\n" + JSON.stringify({
-    preGuard: summarizeObservation(preGuard),
-    receipt: summarizeObservation(receiptAttempt),
-    complete: summarizeObservation(completeAttempt),
-    receiptOpenAttempts: openOrder.filter((name) => name === "receipt.json").length,
-    completeOpenAttempts: openOrder.filter((name) => name === "COMPLETE.json").length,
-    partialFileBasenames: [...partialFileSnapshot.keys()].map((file) => path.basename(file)).sort(),
-  }, null, 2));
-
   assert.equal(receiptAttempt.outcome, "threw");
   assert.equal(completeAttempt.outcome, "threw");
   assert.equal(openOrder.filter((name) => name === "receipt.json").length, 0);
@@ -1789,7 +1779,6 @@ void test("capture binding: persistence-success aggregate", async () => {
           const postCompleteGuardError = await observe(() => persistence.persistGuardError(guardError));
           const events = evidenceIoEventSummary(io);
           const openOrder = events.openBasenames as string[];
-          const guardIndex = openOrder.indexOf("guard-error.json");
           const receiptIndices = openOrder.flatMap((name, index) => name === "receipt.json" ? [index] : []);
           const completeIndex = openOrder.indexOf("COMPLETE.json");
           const completeFileHashes = complete.outcome === "returned"
@@ -2163,7 +2152,7 @@ async function assertPersistedControlRejectionMatrix(
   const accepted = records
     .filter((record) => fieldOutcome(record.actual, "persistBeforeGuard") === "returned")
     .map((record) => record.label);
-  console.log(`${name} persisted-control outcomes:\n${JSON.stringify(records, null, 2)}`);
+  void `${name} persisted-control outcomes:\n${JSON.stringify(records, null, 2)}`;
   const acceptedDiagnostic = accepted.map((label) =>
     `expected persisted-control rejection, observed acceptance: ${label}`,
   );
@@ -2423,7 +2412,7 @@ void test("capture binding: persisted all-control blob retention", async () => {
     persistedHasBytes,
     persistence: execution.outcome,
   };
-  console.log(`persisted all-control blob retention outcomes:\n${JSON.stringify(outcomes, null, 2)}`);
+  void `persisted all-control blob retention outcomes:\n${JSON.stringify(outcomes, null, 2)}`;
   assert.equal(mismatches.length, 0, `control blob missing: ${JSON.stringify({ mismatches, outcomes }, null, 2)}`);
 });
 
@@ -2472,7 +2461,7 @@ void test("capture binding: persisted serialized roles and links", async () => {
     persistence: execution.outcome,
     mismatches,
   };
-  console.log(`persisted serialized roles and links outcomes:\n${JSON.stringify(outcomes, null, 2)}`);
+  void `persisted serialized roles and links outcomes:\n${JSON.stringify(outcomes, null, 2)}`;
   assert.equal(mismatches.length, 0, `serialized role/link fields differ: ${JSON.stringify(outcomes, null, 2)}`);
 });
 
@@ -2515,7 +2504,7 @@ void test("capture binding: persisted single blob for shared digest", async () =
     persistence: execution.outcome,
     mismatches,
   };
-  console.log(`persisted single blob for shared digest outcomes:\n${JSON.stringify(outcomes, null, 2)}`);
+  void `persisted single blob for shared digest outcomes:\n${JSON.stringify(outcomes, null, 2)}`;
   assert.equal(mismatches.length, 0, `single blob for shared digest mismatches: ${JSON.stringify(outcomes, null, 2)}`);
 });
 
@@ -2956,11 +2945,14 @@ void test("capture binding: preserved attempt-2 lifecycle is exact", async () =>
         await persistence.persistBeforeGuard(payload);
         await persistence.persistGuardError(guardError);
         await persistence.persistFinalReceipt(finalReceiptForPayload(payload, guardError), guardError);
+        // The single-argument call is intentional: this case verifies runtime rejection when beforeComplete is missing.
+        /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/unbound-method -- intentional arity and method-reference violations under test */
         const completion = await observe(() => Reflect.apply(
           persistence.writeComplete,
           persistence,
           [guardError],
         ));
+        /* eslint-enable @typescript-eslint/no-unsafe-return, @typescript-eslint/unbound-method */
         return {
           completion: summarizeObservation(completion),
           completeOpenAttempts: openBasenames(io.events).filter((name) => name === "COMPLETE.json").length,
@@ -3096,7 +3088,7 @@ void test("capture binding: toolchain receipt metadata uses pinned package bytes
   const cloneControl = (
     control: BoundControlInput,
     changes: Record<string, unknown>,
-  ): BoundControlInput => Object.freeze({ ...control, ...changes }) as unknown as BoundControlInput;
+  ): BoundControlInput => Object.freeze({ ...control, ...changes });
   const replaceControl = (
     controls: readonly BoundControlInput[],
     target: BoundControlInput,
@@ -3311,7 +3303,7 @@ void test("capture binding: toolchain receipt metadata uses pinned package bytes
         const helperEnd = source.indexOf("\nfunction parseMetafile(", helperStart);
         const helperSource = source.slice(helperStart, helperEnd);
         return {
-          helperCallUsesCapturedControlsAndVersions: /preparePinnedToolchainMetadata\(controls, process\.version, version as string\)/.test(source) &&
+          helperCallUsesCapturedControlsAndVersions: /preparePinnedToolchainMetadata\(controls, process\.version, version\)/.test(source) &&
             /bindingContext: Object\.freeze\(\{\s*expectedManifest: controlManifest,\s*compiledInputs: mergedInputs,\s*controls,/.test(source) &&
             /prepareEvidenceInputs\(mergedInputs, controls, manifestBytes, stylesBytes\)/.test(source),
           manifestUsesPinnedToolchain: /toolchain:\s*pinnedToolchainMetadata\.toolchain/.test(source),
