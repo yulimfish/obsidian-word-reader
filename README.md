@@ -2,6 +2,12 @@
 
 [中文文档](README.zh-CN.md) | [Roadmap](ROADMAP.md)
 
+> **Upstream:** This is a new project maintained at
+> [`yulimfish/obsidian-word-reader`](https://github.com/yulimfish/obsidian-word-reader).
+> It is based on the upstream project
+> [`qianwei4712/obsidian-word-reader`](https://github.com/qianwei4712/obsidian-word-reader).
+> The upstream authors retain credit for the original work.
+
 Office Reader is a desktop-only Obsidian plugin for opening `.docx`, `.pptx`,
 and `.xlsx` files directly inside Obsidian as safe, read-only documents.
 

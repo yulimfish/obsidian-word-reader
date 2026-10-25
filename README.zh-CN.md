@@ -2,6 +2,12 @@
 
 [English README](README.md) | [迭代路线](ROADMAP.md)
 
+> **上游项目：** 本项目是
+> [`yulimfish/obsidian-word-reader`](https://github.com/yulimfish/obsidian-word-reader)
+> 的新项目，基于上游项目
+> [`qianwei4712/obsidian-word-reader`](https://github.com/qianwei4712/obsidian-word-reader)
+> 开发，原作者保留原始工作的署名权。
+
 Office Reader 是一个 Obsidian 桌面端插件，用于在 Obsidian 内直接打开
 `.docx`、`.pptx` 和 `.xlsx` 文件，并以只读方式阅读 Office 文档。
 
