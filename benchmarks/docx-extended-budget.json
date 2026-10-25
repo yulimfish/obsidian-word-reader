@@ -1,0 +1,32 @@
+{
+  "format": "docx",
+  "fixture": "generated-500-page-docx",
+  "description": "Extended 500-page DOCX package, structural parse, simulated adaptive DOM commit, heap, output, cancellation and cleanup budget. Timing and heap gates use the p95 of three isolated processes.",
+  "maximums": {
+    "p95.packageLoadMs": 1000,
+    "p95.parseMs": 1000,
+    "p95.firstReadableMs": 1500,
+    "p95.searchMs": 100,
+    "p95.navigationMs": 100,
+    "p95.scrollFrameP95Ms": 20,
+    "p95.peakHeapMiB": 192,
+    "p95.maximumDomNodes": 8000,
+    "p95.cacheEntries": 1,
+    "p95.cacheAfterCleanup": 0,
+    "p95.maximumWorkSliceMs": 50
+  },
+  "minimums": {
+    "median.contentUnits": 500,
+    "median.searchMatches": 1,
+    "median.yieldCount": 1
+  },
+  "requirements": {
+    "checks.firstReadablePassed": true,
+    "checks.navigationPassed": true,
+    "checks.cacheWithinLimit": true,
+    "checks.cancellationPassed": true,
+    "checks.cleanupPassed": true,
+    "checks.outputConsistencyPassed": true,
+    "checks.responseBudgetPassed": true
+  }
+}

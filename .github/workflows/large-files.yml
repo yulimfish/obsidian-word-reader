@@ -1,0 +1,50 @@
+name: Extended large files
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  extended:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Extended large-file budget
+        run: npm run large-files:extended
+
+      - name: Add extended large-file summary
+        if: ${{ always() && hashFiles('benchmark-results/large-files-summary.md') != '' }}
+        shell: bash
+        run: cat benchmark-results/large-files-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload extended large-file trend point
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-reader-large-files-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmark-results/large-files.latest.json
+            benchmark-results/large-files-trend.json
+            benchmark-results/large-files-summary.md
+          if-no-files-found: warn
+          retention-days: 90

@@ -1,0 +1,63 @@
+import type { TFile } from "obsidian";
+
+import type { OfficeReaderAdapter } from "./adapters";
+import type { ReaderCapabilities } from "./capabilities";
+import type { ReaderFileChange } from "./fileRevision";
+import type { ReaderWorkspaceRecoveryReason } from "./workspaceRecovery";
+
+export interface ReaderSession {
+  readonly adapter: OfficeReaderAdapter<unknown, unknown>;
+  readonly capabilities: ReaderCapabilities;
+  readonly file: TFile | null;
+
+  onOpen: () => Promise<void>;
+  onClose: () => Promise<void>;
+  onLoadFile: (file: TFile) => Promise<void>;
+  onUnloadFile: (file: TFile) => Promise<void>;
+  reload: () => Promise<void>;
+  refreshInterfaceLanguage: () => void;
+  handleFileChange?: (change: ReaderFileChange) => void;
+  handleWorkspaceRecovery?: (reason: ReaderWorkspaceRecoveryReason) => void;
+  copyText?: () => Promise<void>;
+  copyFormulas?: () => Promise<void>;
+  copyMarkdown?: () => Promise<void>;
+  createSummaryNote?: () => Promise<void>;
+  copyDiagnostics?: () => Promise<void>;
+  openExternal?: () => Promise<void>;
+  previousPage?: () => Promise<void>;
+  nextPage?: () => Promise<void>;
+  toggleNotes?: () => void;
+  toggleFullscreen?: () => Promise<void>;
+  focusSearch?: () => void;
+  focusNameBox?: () => void;
+}
+
+export type ReaderCommand =
+  | "reload"
+  | "copyText"
+  | "copyFormulas"
+  | "copyMarkdown"
+  | "createSummaryNote"
+  | "copyDiagnostics"
+  | "openExternal"
+  | "previousPage"
+  | "nextPage"
+  | "toggleNotes"
+  | "toggleFullscreen"
+  | "focusSearch"
+  | "focusNameBox";
+
+export function isReaderSession(value: unknown): value is ReaderSession {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<ReaderSession>;
+  return (
+    typeof candidate.reload === "function" &&
+    typeof candidate.refreshInterfaceLanguage === "function" &&
+    typeof candidate.adapter === "object" &&
+    candidate.adapter !== null &&
+    typeof candidate.capabilities === "object" &&
+    candidate.capabilities !== null
+  );
+}

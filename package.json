@@ -1,0 +1,58 @@
+{
+  "name": "obsidian-word-reader",
+  "version": "3.6.0",
+  "description": "Read .docx, .pptx, and .xlsx files inside Obsidian without modifying the originals.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
+    "test": "node scripts/run-tests.mjs",
+    "security:scan": "node scripts/security-scan.mjs",
+    "performance:check": "node scripts/run-performance-benchmarks.mjs",
+    "large-files:extended": "node scripts/run-performance-benchmarks.mjs --extended",
+    "lifecycle:check": "node scripts/run-lifecycle-stress.mjs",
+    "zip-reader:check": "node scripts/verify-read-only-zip.mjs",
+    "dependencies:audit": "node scripts/audit-dependencies.mjs",
+    "dependencies:licenses": "node scripts/audit-dependencies.mjs --write",
+    "check": "npm run lint && npm run typecheck && npm test && npm run zip-reader:check && npm run build && npm run performance:check && npm run lifecycle:check && npm run dependencies:audit && npm run security:scan",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "release:check": "node scripts/audit-dependencies.mjs && node scripts/release-check.mjs",
+    "release:notes": "node scripts/extract-changelog.mjs",
+    "release:zip": "npm run build && node scripts/package-release.mjs",
+    "release": "npm run lint && npm run typecheck && npm test && npm run zip-reader:check && npm run release:zip && npm run performance:check && npm run large-files:extended && npm run lifecycle:check && npm run dependencies:audit && npm run security:scan && npm run release:check && npm run release:notes"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "docx",
+    "word",
+    "pptx",
+    "powerpoint",
+    "xlsx",
+    "excel",
+    "spreadsheet"
+  ],
+  "author": "qianw",
+  "license": "MIT",
+  "dependencies": {
+    "@xmldom/xmldom": "0.8.13",
+    "docx-preview": "0.3.7",
+    "immediate": "file:vendor/immediate",
+    "jszip": "3.10.1",
+    "setimmediate": "file:vendor/setimmediate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^20.17.10",
+    "esbuild": "^0.24.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.3.0",
+    "globals": "^17.6.0",
+    "jiti": "^2.6.1",
+    "obsidian": "^1.13.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.59.1"
+  }
+}

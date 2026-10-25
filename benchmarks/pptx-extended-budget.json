@@ -1,0 +1,32 @@
+{
+  "format": "pptx",
+  "fixture": "generated-2000-slide-pptx",
+  "description": "Extended 2,000-slide PPTX metadata, priority scheduling, bounded navigation, heap, output, cancellation and cleanup budget. Timing and heap gates use the p95 of three isolated processes.",
+  "maximums": {
+    "p95.packageLoadMs": 3000,
+    "p95.parseMs": 5000,
+    "p95.firstReadableMs": 3500,
+    "p95.searchMs": 250,
+    "p95.navigationMs": 100,
+    "p95.scrollFrameP95Ms": 20,
+    "p95.peakHeapMiB": 384,
+    "p95.maximumDomNodes": 3000,
+    "p95.cacheEntries": 2200,
+    "p95.cacheAfterCleanup": 0,
+    "p95.maximumWorkSliceMs": 50
+  },
+  "minimums": {
+    "median.contentUnits": 2000,
+    "median.searchMatches": 1,
+    "median.yieldCount": 1
+  },
+  "requirements": {
+    "checks.firstReadablePassed": true,
+    "checks.navigationPassed": true,
+    "checks.cacheWithinLimit": true,
+    "checks.cancellationPassed": true,
+    "checks.cleanupPassed": true,
+    "checks.outputConsistencyPassed": true,
+    "checks.responseBudgetPassed": true
+  }
+}

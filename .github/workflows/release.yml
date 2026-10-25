@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Read-only ZIP smoke
+        run: npm run zip-reader:check
+
+      - name: Build
+        run: npm run build
+
+      - name: Performance budget
+        run: npm run performance:check
+
+      - name: Extended large-file budget
+        run: npm run large-files:extended
+
+      - name: Add extended large-file summary
+        if: ${{ always() && hashFiles('benchmark-results/large-files-summary.md') != '' }}
+        shell: bash
+        run: cat benchmark-results/large-files-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload extended large-file trend point
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-reader-release-large-files-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmark-results/large-files.latest.json
+            benchmark-results/large-files-trend.json
+            benchmark-results/large-files-summary.md
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Lifecycle stress
+        run: npm run lifecycle:check
+
+      - name: Dependency audit
+        run: npm run dependencies:audit
+
+      - name: Security scan
+        run: npm run security:scan
+
+      - name: Package release zip
+        run: npm run release:zip
+
+      - name: Validate release
+        run: node scripts/release-check.mjs --tag "$GITHUB_REF_NAME"
+
+      - name: Extract release notes
+        run: npm run release:notes
+
+      - name: Read package version
+        id: package
+        shell: bash
+        run: |
+          VERSION=$(node -p 'require("./package.json").version')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/main.js
+            dist/docx-engine.cjs
+            dist/manifest.json
+            dist/styles.css
+            release/obsidian-word-reader-${{ steps.package.outputs.version }}.zip
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/main.js#main.js" \
+            "dist/docx-engine.cjs#docx-engine.cjs" \
+            "dist/manifest.json#manifest.json" \
+            "dist/styles.css#styles.css" \
+            "release/obsidian-word-reader-${{ steps.package.outputs.version }}.zip#obsidian-word-reader-${{ steps.package.outputs.version }}.zip" \
+            --title "${{ steps.package.outputs.version }}" \
+            --notes-file "release/CHANGELOG-${{ steps.package.outputs.version }}.md" \
+            --verify-tag

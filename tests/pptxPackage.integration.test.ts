@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import JSZip from "jszip";
+
+import {
+  PptxPackage,
+  relationshipPartPath,
+  resolvePackagePath,
+} from "../src/pptx/pptxPackage";
+import { createMinimalPptx } from "./pptxFixture";
+import { createLargePptx } from "./performanceFixtures";
+
+void test("PptxPackage resolves slide, layout, master, theme, and media", async () => {
+  const pptx = await PptxPackage.load(await createMinimalPptx());
+  assert.equal(pptx.slideCount, 1);
+  assert.equal(pptx.slideWidth, 12_192_000);
+  assert.equal(pptx.slideHeight, 6_858_000);
+  assert.deepEqual(pptx.slidePaths, ["ppt/slides/slide1.xml"]);
+
+  const context = await pptx.getSlideContext(0);
+  assert.equal(context.layoutPath, "ppt/slideLayouts/slideLayout1.xml");
+  assert.equal(context.masterPath, "ppt/slideMasters/slideMaster1.xml");
+  assert.equal(context.themePath, "ppt/theme/theme1.xml");
+  assert.equal(
+    context.slideRelationships.get("rId2")?.target,
+    "../media/image1.png",
+  );
+  assert.ok(await pptx.getBinary("ppt/media/image1.png"));
+
+  const metadata = await pptx.getSlideMetadata(0);
+  assert.equal(metadata.title, "Hello PPTX");
+  assert.match(metadata.text, /A1/);
+  assert.equal(metadata.notes, "Discuss the quarterly trend.");
+  assert.deepEqual(await pptx.getAllSlideMetadata(), [metadata]);
+});
+
+void test("PowerPoint relationship paths stay inside the package", () => {
+  assert.equal(
+    relationshipPartPath("ppt/slides/slide1.xml"),
+    "ppt/slides/_rels/slide1.xml.rels",
+  );
+  assert.equal(
+    resolvePackagePath(
+      "ppt/slides/slide1.xml",
+      "../slideLayouts/slideLayout1.xml",
+    ),
+    "ppt/slideLayouts/slideLayout1.xml",
+  );
+  assert.throws(() =>
+    resolvePackagePath("ppt/presentation.xml", "../../../outside.xml"),
+  );
+});
+
+void test("PPTX metadata indexing prioritizes nearby slides and yields in bounded batches", async () => {
+  const pptx = await PptxPackage.load(await createLargePptx(7));
+  const completionOrder: number[] = [];
+  let yieldCount = 0;
+  const metadata = await pptx.indexSlideMetadata({
+    concurrency: 1,
+    priorityIndex: 3,
+    batchSize: 2,
+    onMetadata: (slide) => completionOrder.push(slide.index),
+    yieldControl: async () => undefined,
+    onYield: () => {
+      yieldCount += 1;
+    },
+  });
+
+  assert.deepEqual(completionOrder, [3, 4, 2, 5, 1, 6, 0]);
+  assert.deepEqual(metadata.map((slide) => slide.index), [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(yieldCount, 3);
+});
+
+void test("PptxPackage rejects macro-enabled packages", async () => {
+  const zip = await JSZip.loadAsync(await createMinimalPptx());
+  zip.file("ppt/vbaProject.bin", Uint8Array.from([1, 2, 3]));
+  const buffer = await zip.generateAsync({ type: "arraybuffer" });
+  await assert.rejects(
+    () => PptxPackage.load(buffer),
+    /Macro-enabled PowerPoint packages are not supported/,
+  );
+});

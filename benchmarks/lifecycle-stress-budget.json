@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "minimumCyclesPerSequence": 100,
+  "minimumErrorIterationsPerCase": 25,
+  "minimumHandledTaskErrorsPerCycle": 1,
+  "minimumRevisionInvalidationsPerCycle": 2,
+  "maximumRetainedHeapGrowthMiB": 16,
+  "sustainedHeapGrowthWindow": 20
+}

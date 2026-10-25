@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check
+        run: npm run check
+
+      - name: Add performance summary
+        if: ${{ always() && hashFiles('benchmark-results/performance-summary.md') != '' }}
+        shell: bash
+        run: cat benchmark-results/performance-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add lifecycle stress summary
+        if: ${{ always() && hashFiles('benchmark-results/lifecycle-stress-summary.md') != '' }}
+        shell: bash
+        run: cat benchmark-results/lifecycle-stress-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance trend point
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-reader-performance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmark-results/performance.latest.json
+            benchmark-results/performance-trend.json
+            benchmark-results/performance-summary.md
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Upload lifecycle trend point
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-reader-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmark-results/lifecycle-stress.latest.json
+            benchmark-results/lifecycle-stress-trend.json
+            benchmark-results/lifecycle-stress-summary.md
+          if-no-files-found: warn
+          retention-days: 90

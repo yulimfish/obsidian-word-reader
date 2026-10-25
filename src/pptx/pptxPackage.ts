@@ -1,0 +1,587 @@
+import type JSZip from "jszip";
+
+import {
+  descendantsNamed,
+  namespacedAttribute,
+  numberAttribute,
+  parseXml,
+} from "./xml";
+import {
+  DEFAULT_PPTX_ZIP_LIMITS,
+  validateZipSafety,
+  type ZipSafetyLimits,
+  type ZipSafetySummary,
+} from "./zipLimits";
+import {
+  enforceOoxmlPackagePolicy,
+} from "../ooxml/packagePolicy";
+import { loadOoxmlZip } from "../ooxml/jszipReader";
+import {
+  extractSlideMetadata,
+  type PptxSlideMetadata,
+} from "./pptxMetadata";
+import { LruCache } from "../reader/lruCache";
+import { collectValidatedPptxImagePaths, isCanonicalPreviewPath, readOoxmlPreviewMetadata, type OoxmlPreviewMetadata } from "../ooxml/equationPreviews";
+import type { PreviewInventory } from "../ooxml/previewTypes";
+
+const DEFAULT_SLIDE_WIDTH = 12_192_000;
+const DEFAULT_SLIDE_HEIGHT = 6_858_000;
+const OFFICE_RELATIONSHIP_NAMESPACE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const XML_CACHE_CAPACITY = 48;
+const RELATIONSHIP_CACHE_CAPACITY = 64;
+const SLIDE_CONTEXT_CACHE_CAPACITY = 12;
+const BINARY_CACHE_CAPACITY = 24;
+const MAX_METADATA_CONCURRENCY = 4;
+
+// Module-private storage preserves the read boundary without ES2018 private-field helpers.
+const readBoundaries = new WeakMap<PptxPackage, {
+  images: ReadonlySet<string>;
+  metadata: OoxmlPreviewMetadata;
+}>();
+
+export interface PptxRelationship {
+  id: string;
+  type: string;
+  target: string;
+  external: boolean;
+}
+
+export interface PptxSlideContext {
+  slidePath: string;
+  slide: Document;
+  slideRelationships: Map<string, PptxRelationship>;
+  layoutPath: string | null;
+  layout: Document | null;
+  layoutRelationships: Map<string, PptxRelationship>;
+  masterPath: string | null;
+  master: Document | null;
+  masterRelationships: Map<string, PptxRelationship>;
+  themePath: string | null;
+  theme: Document | null;
+}
+
+export interface PptxMetadataIndexOptions {
+  concurrency?: number;
+  batchSize?: number;
+  priorityIndex?: number;
+  isCancelled?: () => boolean;
+  onMetadata?: (metadata: PptxSlideMetadata) => void;
+  onWorkSlice?: (durationMs: number) => void;
+  onYield?: () => void;
+  yieldControl?: () => Promise<void>;
+}
+
+export interface PptxCacheDiagnostics {
+  xmlEntries: number;
+  relationshipEntries: number;
+  slideContextEntries: number;
+  binaryEntries: number;
+  metadataEntries: number;
+  limits: {
+    xmlEntries: number;
+    relationshipEntries: number;
+    slideContextEntries: number;
+    binaryEntries: number;
+    metadataEntries: number;
+  };
+}
+
+export class PptxPackageError extends Error {
+  constructor(
+    readonly kind: "damaged" | "unsupported",
+    message: string,
+  ) {
+    super(message);
+    this.name = "PptxPackageError";
+  }
+}
+
+export class PptxMetadataCancelledError extends Error {
+  constructor() {
+    super("PowerPoint metadata indexing was cancelled.");
+    this.name = "PptxMetadataCancelledError";
+  }
+}
+
+export class PptxPackage {
+  readonly slideWidth: number;
+  readonly slideHeight: number;
+  readonly slidePaths: string[];
+  readonly zipSummary: ZipSafetySummary;
+  readonly previewInventory: PreviewInventory | null;
+
+  private readonly xmlCache =
+    new LruCache<string, Promise<Document>>(XML_CACHE_CAPACITY);
+  private readonly relationshipCache =
+    new LruCache<string, Promise<Map<string, PptxRelationship>>>(
+      RELATIONSHIP_CACHE_CAPACITY,
+    );
+  private readonly slideContextCache =
+    new LruCache<number, Promise<PptxSlideContext>>(
+      SLIDE_CONTEXT_CACHE_CAPACITY,
+    );
+  private readonly binaryCache =
+    new LruCache<string, Promise<Uint8Array | null>>(BINARY_CACHE_CAPACITY);
+  private readonly metadataCache =
+    new Map<number, Promise<PptxSlideMetadata>>();
+
+  private constructor(
+    private readonly zip: JSZip,
+    presentation: Document,
+    presentationRelationships: Map<string, PptxRelationship>,
+    zipSummary: ZipSafetySummary,
+    previewInventory: PreviewInventory | null,
+    imagePaths: ReadonlySet<string>,
+    metadata: OoxmlPreviewMetadata,
+  ) {
+    const slideSize = descendantsNamed(
+      presentation.documentElement,
+      "sldSz",
+    )[0];
+    this.slideWidth = numberAttribute(
+      slideSize,
+      "cx",
+      DEFAULT_SLIDE_WIDTH,
+    );
+    this.slideHeight = numberAttribute(
+      slideSize,
+      "cy",
+      DEFAULT_SLIDE_HEIGHT,
+    );
+    this.slidePaths = descendantsNamed(
+      presentation.documentElement,
+      "sldId",
+    )
+      .map((slideId) =>
+        namespacedAttribute(
+          slideId,
+          "id",
+          OFFICE_RELATIONSHIP_NAMESPACE,
+        ),
+      )
+      .map((relationshipId) =>
+        relationshipId
+          ? presentationRelationships.get(relationshipId)
+          : undefined,
+      )
+      .filter(
+        (relationship): relationship is PptxRelationship =>
+          relationship !== undefined && !relationship.external,
+      )
+      .map((relationship) =>
+        resolvePackagePath("ppt/presentation.xml", relationship.target),
+      );
+    this.zipSummary = zipSummary;
+    this.previewInventory = previewInventory;
+    readBoundaries.set(this, { images: new Set(imagePaths), metadata });
+  }
+
+  static async load(
+    buffer: ArrayBuffer,
+    limits: ZipSafetyLimits = DEFAULT_PPTX_ZIP_LIMITS,
+  ): Promise<PptxPackage> {
+    const zipSummary = validateZipSafety(buffer, limits);
+    let zip: JSZip;
+    try {
+      zip = await loadOoxmlZip(buffer);
+    } catch (error) {
+      throw new PptxPackageError(
+        "damaged",
+        `The PowerPoint ZIP package could not be opened: ${getErrorMessage(error)}`,
+      );
+    }
+
+    ensureRequiredEntry(zip, "[Content_Types].xml");
+    ensureRequiredEntry(zip, "ppt/presentation.xml");
+    if (zip.file("ppt/vbaProject.bin")) {
+      throw new PptxPackageError(
+        "unsupported",
+        "Macro-enabled PowerPoint packages are not supported.",
+      );
+    }
+    let previewInventory: PreviewInventory | null;
+    let imagePaths: ReadonlySet<string>;
+    let metadata: OoxmlPreviewMetadata;
+    try {
+      previewInventory = await enforceOoxmlPackagePolicy(zip, "pptx", { legacyEquationPreviews: true });
+      imagePaths = await collectValidatedPptxImagePaths(zip, previewInventory);
+      metadata = await readOoxmlPreviewMetadata(zip);
+    } catch (error) {
+      throw new PptxPackageError("unsupported", getErrorMessage(error));
+    }
+    const presentationXml = await readZipText(zip, "ppt/presentation.xml", metadata.embeddingPaths);
+    const presentation = parsePackageXml(
+      presentationXml,
+      "ppt/presentation.xml",
+    );
+    const relationships = new Map(metadata.relationships.get("ppt/presentation.xml"));
+    const pptx = new PptxPackage(
+      zip,
+      presentation,
+      relationships,
+      zipSummary,
+      previewInventory,
+      imagePaths,
+      metadata,
+    );
+    if (pptx.slidePaths.length === 0) {
+      throw new PptxPackageError(
+        "unsupported",
+        "The presentation does not contain any readable slides.",
+      );
+    }
+    for (const slidePath of pptx.slidePaths) {
+      ensureRequiredEntry(zip, slidePath);
+    }
+    return pptx;
+  }
+
+  get slideCount(): number {
+    return this.slidePaths.length;
+  }
+
+  async getSlideContext(index: number): Promise<PptxSlideContext> {
+    return this.slideContextCache.getOrCreate(
+      index,
+      () => this.readSlideContext(index),
+    );
+  }
+
+  private async readSlideContext(index: number): Promise<PptxSlideContext> {
+    const slidePath = this.slidePaths[index];
+    if (!slidePath) {
+      throw new RangeError(`Slide index ${index} is outside the presentation.`);
+    }
+
+    const slide = await this.getXml(slidePath);
+    const slideRelationships = await this.getRelationships(slidePath);
+    const layoutRelationship = findRelationship(
+      slideRelationships,
+      "/slideLayout",
+    );
+    const layoutPath =
+      layoutRelationship && !layoutRelationship.external
+        ? resolvePackagePath(slidePath, layoutRelationship.target)
+        : null;
+    const layout = layoutPath ? await this.getOptionalXml(layoutPath) : null;
+    const layoutRelationships = layoutPath
+      ? await this.getRelationships(layoutPath)
+      : new Map<string, PptxRelationship>();
+
+    const masterRelationship = findRelationship(
+      layoutRelationships,
+      "/slideMaster",
+    );
+    const masterPath =
+      layoutPath && masterRelationship && !masterRelationship.external
+        ? resolvePackagePath(layoutPath, masterRelationship.target)
+        : null;
+    const master = masterPath ? await this.getOptionalXml(masterPath) : null;
+    const masterRelationships = masterPath
+      ? await this.getRelationships(masterPath)
+      : new Map<string, PptxRelationship>();
+
+    const themeRelationship = findRelationship(
+      masterRelationships,
+      "/theme",
+    );
+    const themePath =
+      masterPath && themeRelationship && !themeRelationship.external
+        ? resolvePackagePath(masterPath, themeRelationship.target)
+        : null;
+    const theme = themePath ? await this.getOptionalXml(themePath) : null;
+
+    return {
+      slidePath,
+      slide,
+      slideRelationships,
+      layoutPath,
+      layout,
+      layoutRelationships,
+      masterPath,
+      master,
+      masterRelationships,
+      themePath,
+      theme,
+    };
+  }
+
+  getSlideMetadata(index: number): Promise<PptxSlideMetadata> {
+    let pending = this.metadataCache.get(index);
+    if (!pending) {
+      pending = this.readSlideMetadata(index);
+      this.metadataCache.set(index, pending);
+    }
+    return pending;
+  }
+
+  async getAllSlideMetadata(): Promise<PptxSlideMetadata[]> {
+    return this.indexSlideMetadata();
+  }
+
+  async indexSlideMetadata(
+    options: PptxMetadataIndexOptions = {},
+  ): Promise<PptxSlideMetadata[]> {
+    const isCancelled = options.isCancelled ?? (() => false);
+    const concurrency = Math.max(
+      1,
+      Math.min(
+        MAX_METADATA_CONCURRENCY,
+        Math.floor(options.concurrency ?? MAX_METADATA_CONCURRENCY),
+      ),
+    );
+    const order = createPriorityOrder(
+      this.slideCount,
+      options.priorityIndex,
+    );
+    const batchSize = Math.max(1, Math.floor(options.batchSize ?? 8));
+    const yieldControl = options.yieldControl ?? (async () => undefined);
+    const results = new Array<PptxSlideMetadata>(this.slideCount);
+    let cursor = 0;
+
+    const worker = async (): Promise<void> => {
+      let batchProgress = 0;
+      while (cursor < order.length) {
+        if (isCancelled()) {
+          throw new PptxMetadataCancelledError();
+        }
+        const index = order[cursor];
+        cursor += 1;
+        const startedAt = performance.now();
+        const metadata = await this.getSlideMetadata(index);
+        options.onWorkSlice?.(performance.now() - startedAt);
+        if (isCancelled()) {
+          throw new PptxMetadataCancelledError();
+        }
+        results[index] = metadata;
+        options.onMetadata?.(metadata);
+        batchProgress += 1;
+        if (batchProgress >= batchSize && cursor < order.length) {
+          batchProgress = 0;
+          await yieldControl();
+          options.onYield?.();
+          if (isCancelled()) {
+            throw new PptxMetadataCancelledError();
+          }
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from(
+        { length: Math.min(concurrency, order.length) },
+        () => worker(),
+      ),
+    );
+    return results;
+  }
+
+  async getBinary(path: string): Promise<Uint8Array | null> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
+    if (!readBoundaries.get(this)!.images.has(path)) {
+      throw new PptxPackageError("unsupported", "Unvalidated image part.");
+    }
+    return this.binaryCache.getOrCreate(path, () => {
+      const entry = this.zip.file(path);
+      return entry ? entry.async("uint8array") : Promise.resolve(null);
+    });
+  }
+
+  getCacheDiagnostics(): PptxCacheDiagnostics {
+    return {
+      xmlEntries: this.xmlCache.size,
+      relationshipEntries: this.relationshipCache.size,
+      slideContextEntries: this.slideContextCache.size,
+      binaryEntries: this.binaryCache.size,
+      metadataEntries: this.metadataCache.size,
+      limits: {
+        xmlEntries: this.xmlCache.capacity,
+        relationshipEntries: this.relationshipCache.capacity,
+        slideContextEntries: this.slideContextCache.capacity,
+        binaryEntries: this.binaryCache.capacity,
+        metadataEntries: this.slideCount,
+      },
+    };
+  }
+
+  clearCaches(): void {
+    this.xmlCache.clear();
+    this.relationshipCache.clear();
+    this.slideContextCache.clear();
+    this.binaryCache.clear();
+    this.metadataCache.clear();
+  }
+
+  getImageMimeType(path: string): string | null {
+    const extension = path.split(".").at(-1)?.toLowerCase();
+    switch (extension) {
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "bmp":
+        return "image/bmp";
+      case "png":
+        return "image/png";
+      default:
+        return null;
+    }
+  }
+
+  private getXml(path: string): Promise<Document> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
+    return this.xmlCache.getOrCreate(path, () =>
+      readZipText(this.zip, path, readBoundaries.get(this)!.metadata.embeddingPaths).then((xml) =>
+        parsePackageXml(xml, path),
+      ),
+    );
+  }
+
+  private async getOptionalXml(path: string): Promise<Document | null> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
+    return this.zip.file(path) ? this.getXml(path) : null;
+  }
+
+  private getRelationships(
+    path: string,
+  ): Promise<Map<string, PptxRelationship>> {
+    assertReadablePath(path, readBoundaries.get(this)!.metadata.embeddingPaths);
+    return this.relationshipCache.getOrCreate(
+      path,
+      () => Promise.resolve(new Map(readBoundaries.get(this)!.metadata.relationships.get(path))),
+    );
+  }
+
+  private async readSlideMetadata(index: number): Promise<PptxSlideMetadata> {
+    const slidePath = this.slidePaths[index];
+    if (!slidePath) {
+      throw new RangeError(`Slide index ${index} is outside the presentation.`);
+    }
+    const slide = await this.getXml(slidePath);
+    const relationships = await this.getRelationships(slidePath);
+    const notesRelationship = findRelationship(relationships, "/notesSlide");
+    const notesPath =
+      notesRelationship && !notesRelationship.external
+        ? resolvePackagePath(slidePath, notesRelationship.target)
+        : null;
+    const notes = notesPath ? await this.getOptionalXml(notesPath) : null;
+    return extractSlideMetadata(
+      index,
+      slide,
+      notes,
+      "",
+    );
+  }
+}
+
+function createPriorityOrder(
+  slideCount: number,
+  priorityIndex?: number,
+): number[] {
+  if (
+    priorityIndex === undefined ||
+    priorityIndex < 0 ||
+    priorityIndex >= slideCount
+  ) {
+    return Array.from({ length: slideCount }, (_, index) => index);
+  }
+  const order = [priorityIndex];
+  for (let distance = 1; order.length < slideCount; distance += 1) {
+    const forward = priorityIndex + distance;
+    const backward = priorityIndex - distance;
+    if (forward < slideCount) {
+      order.push(forward);
+    }
+    if (backward >= 0) {
+      order.push(backward);
+    }
+  }
+  return order;
+}
+
+export function resolvePackagePath(basePath: string, target: string): string {
+  if (target.startsWith("/")) {
+    return normalizePackagePath(target.slice(1));
+  }
+  const baseParts = basePath.split("/");
+  baseParts.pop();
+  return normalizePackagePath([...baseParts, ...target.split("/")].join("/"));
+}
+
+export function relationshipPartPath(path: string): string {
+  const parts = path.split("/");
+  const fileName = parts.pop();
+  return [...parts, "_rels", `${fileName}.rels`].join("/");
+}
+
+function normalizePackagePath(path: string): string {
+  const normalized: string[] = [];
+  for (const part of path.replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (normalized.length === 0) {
+        throw new PptxPackageError(
+          "damaged",
+          "A package relationship escapes the archive root.",
+        );
+      }
+      normalized.pop();
+      continue;
+    }
+    normalized.push(part);
+  }
+  return normalized.join("/");
+}
+
+function findRelationship(
+  relationships: Map<string, PptxRelationship>,
+  typeSuffix: string,
+): PptxRelationship | undefined {
+  return Array.from(relationships.values()).find((relationship) =>
+    relationship.type.endsWith(typeSuffix),
+  );
+}
+
+function ensureRequiredEntry(zip: JSZip, path: string): void {
+  if (!zip.file(path)) {
+    throw new PptxPackageError(
+      "damaged",
+      `The PowerPoint package is missing ${path}.`,
+    );
+  }
+}
+
+function assertReadablePath(path: string, embeddingPaths: ReadonlySet<string>): void {
+  if (!isCanonicalPreviewPath(path) || /(?:^|\/)(?:embeddings|oleobjects)(?:\/|$)/i.test(path) || embeddingPaths.has(path)) {
+    throw new PptxPackageError("unsupported", "Payload or noncanonical path.");
+  }
+}
+
+async function readZipText(zip: JSZip, path: string, embeddingPaths: ReadonlySet<string>): Promise<string> {
+  assertReadablePath(path, embeddingPaths);
+  const entry = zip.file(path);
+  if (!entry) {
+    throw new PptxPackageError(
+      "damaged",
+      `The PowerPoint package is missing ${path}.`,
+    );
+  }
+  return entry.async("string");
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parsePackageXml(xml: string, path: string): Document {
+  try {
+    return parseXml(xml, path);
+  } catch (error) {
+    throw new PptxPackageError(
+      "damaged",
+      `The PowerPoint package contains invalid XML in ${path}: ${getErrorMessage(error)}`,
+    );
+  }
+}

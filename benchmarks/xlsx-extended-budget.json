@@ -1,0 +1,39 @@
+{
+  "format": "xlsx",
+  "fixture": "generated-1048576-row-sparse-and-50000-row-8-column-dense-xlsx",
+  "description": "Extended Excel-row-limit sparse worksheet and 50,000-row/400,000-cell streamed dense workbook. Timing and heap gates use the p95 of three isolated processes.",
+  "maximums": {
+    "p95.packageLoadMs": 3000,
+    "p95.parseMs": 3000,
+    "p95.firstReadableMs": 3000,
+    "p95.searchMs": 1500,
+    "p95.navigationMs": 100,
+    "p95.scrollFrameP95Ms": 20,
+    "p95.peakHeapMiB": 384,
+    "p95.maximumDomNodes": 3000,
+    "p95.cacheEntries": 10,
+    "p95.cacheAfterCleanup": 0,
+    "p95.denseParseMs": 10000,
+    "p95.densePeakHeapMiB": 384,
+    "p95.maximumSheetDataBufferKiB": 256,
+    "p95.maximumWorkSliceMs": 50
+  },
+  "minimums": {
+    "median.contentUnits": 1048576,
+    "median.searchMatches": 1,
+    "median.denseRows": 50000,
+    "median.densePopulatedCells": 400000,
+    "median.streamedChunkCount": 2,
+    "median.yieldCount": 1
+  },
+  "requirements": {
+    "checks.firstReadablePassed": true,
+    "checks.navigationPassed": true,
+    "checks.cacheWithinLimit": true,
+    "checks.cancellationPassed": true,
+    "checks.cleanupPassed": true,
+    "checks.streamedParsingPassed": true,
+    "checks.outputConsistencyPassed": true,
+    "checks.responseBudgetPassed": true
+  }
+}

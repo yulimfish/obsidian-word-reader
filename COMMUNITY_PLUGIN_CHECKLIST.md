@@ -1,0 +1,151 @@
+# Obsidian Community Plugin Submission Checklist
+
+Use this checklist before submitting the initial release to the Obsidian
+Community directory and before publishing later releases.
+
+## Automated checks
+
+- [ ] Run `npm ci` from a clean checkout.
+- [ ] Run `npm run check`.
+- [ ] Run `npm run release`.
+- [ ] Confirm `npm run zip-reader:check` validates the production inflate-only
+  async and streamed OOXML read path.
+- [ ] Confirm `npm run performance:check` passes DOCX, PPTX, and XLSX budgets,
+  reports `dist/main.js` at or below 500 KiB and the release zip at or below
+  8 MiB, and writes the machine-readable CI trend artifacts.
+- [ ] Confirm `npm run large-files:extended` passes 500-page DOCX, 2,000-slide
+  PPTX, Excel-row-limit sparse XLSX, and 50,000-row/400,000-cell dense XLSX
+  budgets and writes its result, trend, and summary artifacts.
+- [ ] Confirm `npm run lifecycle:check` completes four 100-cycle sequences and
+  the 300-attempt recovery matrix with zero resource residue, stale UI commits,
+  sustained heap growth, or unhandled Promise rejections.
+- [ ] Run `node scripts/release-check.mjs --tag X.Y.Z`.
+- [ ] Confirm all commands finish without warnings or errors.
+- [ ] Confirm `release/obsidian-word-reader-X.Y.Z.zip` contains only
+  `main.js`, `docx-engine.cjs`, `manifest.json`, and `styles.css`.
+
+## Repository metadata
+
+- [ ] `README.md` explains the plugin purpose, installation, usage, support
+  boundaries, security behavior, and any external access.
+- [ ] `LICENSE` exists and dependency licenses are compatible.
+- [ ] `THIRD_PARTY_LICENSES.md` matches `npm run dependencies:audit`, and all
+  top-level runtime registry dependencies use exact versions.
+- [ ] `manifest.json` is committed on the default branch and contains the
+  intended release version.
+- [ ] The manifest display name is `Office Reader`; the stable plugin ID
+  remains `word-reader` for update compatibility.
+- [ ] `versions.json` maps the release version to the correct minimum Obsidian
+  version.
+- [ ] The manifest ID is unique, lowercase, contains only letters and hyphens,
+  does not contain `obsidian`, and does not end in `plugin`.
+- [ ] The manifest description is no more than 250 characters, ends with a
+  period, and describes the user-visible action.
+- [ ] `isDesktopOnly` remains `true` while the plugin uses Node.js or Electron
+  APIs.
+- [ ] The repository is public and its source code matches the release assets.
+
+## Policy and review
+
+- [ ] Review the current Obsidian Developer policies.
+- [ ] Review the current submission requirements and plugin guidelines.
+- [ ] Confirm there is no telemetry, self-update mechanism, obfuscated code,
+  dynamic script injection, or undisclosed network use.
+- [ ] Confirm the plugin does not modify or write back to source `.docx`,
+  `.pptx`, or `.xlsx` files.
+- [ ] Confirm PPTX external relationships are ignored and the production
+  bundle contains no network request code.
+- [ ] Confirm `.xlsx` and legacy `.xls` register only the public read-only
+  `xlsx-reader-view`; `.xlsm` remains unregistered.
+- [ ] Confirm XLSX formulas are cached-only, external workbook references and
+  data connections are never fetched, and hyperlinks require a user click and
+  confirmation.
+- [ ] Confirm legacy XLSX comments expose author/text for populated and blank
+  cells without editing, and modern threaded comments remain outside scope.
+- [ ] Confirm XLSX drawings load only package-local PNG/JPEG/GIF/BMP bytes,
+  external image relationships remain ignored, at most 12 drawings mount
+  together, and at most 8 Blob URLs remain live.
+- [ ] Confirm bar/line/area/pie previews use cached chart series only,
+  unsupported chart types show an explicit fallback, and external/formula
+  chart sources are never evaluated or fetched.
+- [ ] Confirm conditional formatting is bounded to literal numeric `cellIs`,
+  two-/three-color scales, and data bars, with at most 256 rules per sheet.
+- [ ] Confirm worksheet and shared-string XML parses in cancellable chunks,
+  applies serialized backpressure, reports progress, and does not retain
+  complete dense-sheet `sheetData` XML.
+- [ ] Confirm the 20,000-row/80,000-cell dense benchmark stays within the
+  elapsed-time, peak-heap, XML-buffer, and virtual-grid budgets.
+- [ ] Confirm the XLSX grid mounts no more than 2,500 cells plus bounded
+  headers, retains only visible/overscan/frozen ranges, and releases workbook
+  caches after reload, file switch, and view close.
+- [ ] Confirm displayed-value copy and formula copy are separate actions, and
+  persisted XLSX state excludes cell values and formulas.
+- [ ] Confirm the XLSX name box navigates direct/qualified ranges and local or
+  workbook named ranges while rejecting dynamic and external targets.
+- [ ] Confirm workbook search covers visible and hidden worksheets, identifies
+  the result sheet/cell, and cancels cleanly on query, sheet, file, or view
+  changes.
+- [ ] Confirm hidden-sheet indicators require direct user navigation and do not
+  alter source workbook visibility.
+- [ ] Confirm selected ranges copy as explicit TSV and complete Markdown
+  tables under the 250,000-cell ceiling.
+- [ ] Confirm XLSX summary notes include worksheet structure, visibility,
+  supported names, rich-content counts, the current selection, and at most
+  200 content preview cells; existing same-name notes are not overwritten.
+- [ ] Review `XLSM_COMPATIBILITY.md` and confirm `.xlsm` remains unregistered
+  after macro-enabled content type, VBA, ActiveX, OLE, and script-media tests.
+- [ ] Confirm PPTX search, text copy, speaker notes, and summary-note creation
+  operate only on locally parsed presentation content.
+- [ ] Confirm presentation thumbnails mount only for visible and nearby
+  entries, with a fixed upper bound on concurrent previews.
+- [ ] Confirm 1,000-slide navigation mounts at most 60 rows, metadata parsing
+  uses at most four workers, and thumbnail rendering uses at most two workers.
+- [ ] Confirm foreground navigation preempts background metadata, thumbnails,
+  and preload; critical heap/package/image/DOM/cache pressure stops preload,
+  lowers concurrency, and releases inactive caches.
+- [ ] Confirm privacy-safe performance diagnostics report maximum work slice,
+  long-task/yield/preemption counts, memory pressure, and any uninterruptible
+  third-party DOCX render phase without document content or vault paths.
+- [ ] Confirm DOCX search reuses its render-time index without inserting
+  highlight elements into document content.
+- [ ] Confirm presentation Blob URLs are released after thumbnail unmount,
+  cancelled rendering, reload, file switch, and view close.
+- [ ] Confirm copied PPTX render diagnostics exclude document text, speaker
+  notes, internal XML, and absolute vault paths.
+- [ ] Confirm UI text uses sentence case and settings do not repeat the plugin
+  name as a heading.
+- [ ] Confirm desktop-only Electron and Node.js access is guarded.
+- [ ] Run the manual scenarios in `STABILITY.md` in a clean test vault.
+
+## GitHub release
+
+- [ ] Create a plain semantic-version tag such as `3.2.0`; do not add a `v`
+  prefix.
+- [ ] Confirm the tag exactly matches `package.json`, `package-lock.json`,
+  `manifest.json`, `versions.json`, and the latest `CHANGELOG.md` section.
+- [ ] Confirm the GitHub release has binary attachments named `main.js`,
+  `docx-engine.cjs`, `manifest.json`, and `styles.css`.
+- [ ] Install all four release assets into `.obsidian/plugins/word-reader/`,
+  keep `docx-engine.cjs` beside `main.js`, and verify that Obsidian loads the
+  plugin without console errors.
+
+## Initial directory submission
+
+- [ ] Sign in at <https://community.obsidian.md> and link the GitHub account
+  that owns the repository.
+- [ ] Submit
+  <https://github.com/qianwei4712/obsidian-word-reader> as a new plugin.
+- [ ] Confirm the directory reads the expected manifest from the default
+  branch.
+- [ ] Confirm the community installer delivers `docx-engine.cjs`, or document
+  the release zip as the supported install path for the engine sidecar.
+- [ ] Address automated review feedback in a new patch release rather than
+  replacing an existing release.
+
+## Official references
+
+- [Submit your plugin](https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin)
+- [Submission requirements](https://docs.obsidian.md/Plugins/Releasing/Submission+requirements+for+plugins)
+- [Plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines)
+- [Developer policies](https://docs.obsidian.md/Developer+policies)
+- [Manifest reference](https://docs.obsidian.md/Reference/Manifest)
