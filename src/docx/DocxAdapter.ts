@@ -40,7 +40,14 @@ implements OfficeReaderAdapter<ArrayBuffer, HTMLElement> {
 
   async open(app: App, file: TFile): Promise<ArrayBuffer> {
     const buffer = await app.vault.readBinary(file);
-    await validateDocxPackage(buffer);
+    validateZipSafety(buffer, DEFAULT_DOCX_ZIP_LIMITS);
+    const zip = await loadOoxmlZip(buffer);
+    const inventory = await enforceOoxmlPackagePolicy(zip, "docx", {
+      legacyEquationPreviews: true,
+    });
+    if (!inventory) {
+      throw new Error("DOCX equation preview admission returned no inventory.");
+    }
     return buffer;
   }
 

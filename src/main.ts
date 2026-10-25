@@ -1,4 +1,9 @@
-import { Plugin, TFile } from "obsidian";
+import {
+  FileSystemAdapter,
+  Platform,
+  Plugin,
+  TFile,
+} from "obsidian";
 
 import {
   PptxView,
@@ -13,6 +18,14 @@ import {
   VIEW_TYPE_XLSX_READER,
 } from "./XlsxView";
 import { DOCX_ADAPTER } from "./docx/DocxAdapter";
+import type { DocxEngine } from "./docx/docxEngineContract";
+import {
+  createDocxEngineLoader,
+  DocxEngineLoadError,
+  type DocxEngineBuildExpectation,
+  type DocxEngineLoader,
+} from "./docx/docxEngineLoader";
+import { getDocxEngineNodeRuntime } from "./desktopRuntime";
 import { getWordReaderText, type WordReaderText } from "./i18n";
 import { PPTX_ADAPTER } from "./pptx/PptxAdapter";
 import { getPptxReaderText } from "./pptx/pptxI18n";
@@ -50,6 +63,57 @@ import {
 
 const DATA_SAVE_DEBOUNCE_MS = 500;
 
+declare const __DOCX_PLUGIN_VERSION__: string;
+declare const __DOCX_BUILD_ID__: string;
+declare const __DOCX_MANIFEST_MIN_APP_VERSION__: string;
+declare const __DOCX_MANIFEST_SHA256__: string;
+declare const __DOCX_MANIFEST_BYTES__: number;
+declare const __DOCX_STYLES_SHA256__: string;
+declare const __DOCX_STYLES_BYTES__: number;
+declare const __DOCX_ENGINE_SHA256__: string;
+declare const __DOCX_ENGINE_BYTES__: number;
+
+const DOCX_BUILD_EXPECTATION: DocxEngineBuildExpectation = {
+  pluginId: "word-reader",
+  pluginVersion: typeof __DOCX_PLUGIN_VERSION__ === "undefined"
+    ? "3.5.0"
+    : __DOCX_PLUGIN_VERSION__,
+  buildId: typeof __DOCX_BUILD_ID__ === "undefined"
+    ? "development"
+    : __DOCX_BUILD_ID__,
+  abiVersion: 1,
+  minAppVersion: typeof __DOCX_MANIFEST_MIN_APP_VERSION__ === "undefined"
+    ? "1.12.7"
+    : __DOCX_MANIFEST_MIN_APP_VERSION__,
+  mainMaxBytes: 512_000,
+  assets: {
+    "manifest.json": {
+      bytes: typeof __DOCX_MANIFEST_BYTES__ === "undefined"
+        ? 0
+        : __DOCX_MANIFEST_BYTES__,
+      sha256: typeof __DOCX_MANIFEST_SHA256__ === "undefined"
+        ? ""
+        : __DOCX_MANIFEST_SHA256__,
+    },
+    "styles.css": {
+      bytes: typeof __DOCX_STYLES_BYTES__ === "undefined"
+        ? 0
+        : __DOCX_STYLES_BYTES__,
+      sha256: typeof __DOCX_STYLES_SHA256__ === "undefined"
+        ? ""
+        : __DOCX_STYLES_SHA256__,
+    },
+    "docx-engine.cjs": {
+      bytes: typeof __DOCX_ENGINE_BYTES__ === "undefined"
+        ? 0
+        : __DOCX_ENGINE_BYTES__,
+      sha256: typeof __DOCX_ENGINE_SHA256__ === "undefined"
+        ? ""
+        : __DOCX_ENGINE_SHA256__,
+    },
+  },
+};
+
 export default class WordReaderPlugin extends Plugin {
   settings: OfficeReaderSettings = normalizeOfficeReaderSettings(
     DEFAULT_OFFICE_READER_SETTINGS,
@@ -58,8 +122,18 @@ export default class WordReaderPlugin extends Plugin {
   private readonly fileRevisions = new ReaderFileRevisionTracker();
   private dataSaveTimer: number | null = null;
   private dataSavePromise: Promise<void> = Promise.resolve();
+  private docxEngineLoader: DocxEngineLoader | null = null;
 
   async onload(): Promise<void> {
+    this.docxEngineLoader = createDocxEngineLoader(
+      this,
+      DOCX_BUILD_EXPECTATION,
+      {
+        isDesktopApp: () => Platform.isDesktopApp,
+        FileSystemAdapter,
+        getRuntime: getDocxEngineNodeRuntime,
+      },
+    );
     await this.loadSettings();
     this.addSettingTab(new WordReaderSettingTab(this.app, this));
     const text = this.text;
@@ -275,6 +349,16 @@ export default class WordReaderPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.docxEngineLoader?.dispose();
+    this.docxEngineLoader = null;
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_WORD_READER)) {
+      const session = leaf.view;
+      if (isReaderSession(session) && session.adapter.format === "docx") {
+        void session.onClose().catch((error: unknown) => {
+          console.error("Office Reader could not close a DOCX reader during plugin unload", error);
+        });
+      }
+    }
     if (this.dataSaveTimer !== null) {
       window.clearTimeout(this.dataSaveTimer);
       this.dataSaveTimer = null;
@@ -286,6 +370,15 @@ export default class WordReaderPlugin extends Plugin {
 
   get text(): WordReaderText {
     return getWordReaderText(this.settings.common.language);
+  }
+
+  loadDocxEngine(buffer?: ArrayBuffer): Promise<DocxEngine> {
+    if (!this.docxEngineLoader) {
+      return Promise.reject(
+        new DocxEngineLoadError("disposed", "The DOCX engine loader is unavailable."),
+      );
+    }
+    return this.docxEngineLoader.load(buffer);
   }
 
   refreshWordReaderViews(): void {

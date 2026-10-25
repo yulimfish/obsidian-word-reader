@@ -1,17 +1,21 @@
+/* eslint-disable obsidianmd/no-global-this -- These Node boundary tests instrument the parser host, not an Obsidian window. */
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import type { App } from "obsidian";
 import JSZip from "jszip";
-import { DocxAdapter } from "../../src/docx/DocxAdapter";
-import { renderDocx } from "../../src/docx/docxRenderer";
+import { DocxAdapter, validateDocxPackage } from "../../src/docx/DocxAdapter";
+import { createDocxRenderer } from "../../src/docx/docxRenderer";
+import * as docxEngine from "../../src/docx/docxEngine";
 import { enforceOoxmlPackagePolicy } from "../../src/ooxml/packagePolicy";
 import { createEquationFixture } from "./fixtureBuilders";
 import { createLargeDocx } from "../performanceFixtures";
 import ReadOnlyZip, { loadOoxmlZip } from "../../src/ooxml/jszipReader";
+import { XMLSerializer } from "@xmldom/xmldom";
 
 const require = createRequire(__filename);
 const parser = require("docx-preview") as { parseAsync: (...args: unknown[]) => Promise<unknown> };
+const renderDocx = createDocxRenderer(docxEngine);
 
 type EntryRead = { path: string; mode: unknown };
 function observeProductionReads(reads: EntryRead[]): () => void {
@@ -31,7 +35,17 @@ function observeProductionReads(reads: EntryRead[]): () => void {
   return () => { for (const spy of entries) spy.mock.restore(); loadSpy.mock.restore(); };
 }
 
-void test("DOCX original equation source remains rejected before parser through adapter and direct renderer", async () => {
+async function withXmlSerializer<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "XMLSerializer");
+  Object.defineProperty(globalThis, "XMLSerializer", { configurable: true, writable: true, value: XMLSerializer });
+  try { return await operation(); }
+  finally {
+    if (previous) Object.defineProperty(globalThis, "XMLSerializer", previous);
+    else Reflect.deleteProperty(globalThis, "XMLSerializer");
+  }
+}
+
+void test("runtime admission returns original bytes while renderer parses only the sanitized package", async () => {
   const buffer = await createEquationFixture("docx", {
     progId: "Equation.3", previewRelationship: { id: "image", target: "media/preview.png" },
     previewBytes: new Uint8Array([137]), opaqueEmbeddingBytes: new TextEncoder().encode("malicious"),
@@ -39,14 +53,26 @@ void test("DOCX original equation source remains rejected before parser through 
   const before = new Uint8Array(buffer).slice();
   const reads: EntryRead[] = [];
   const restore = observeProductionReads(reads);
-  const parseSpy = mock.method(parser, "parseAsync", async () => { throw new Error("parser reached"); });
+  const parsedBuffers: ArrayBuffer[] = [];
+  const parseSpy = mock.method(parser, "parseAsync", async (input: unknown) => {
+    parsedBuffers.push(input as ArrayBuffer);
+    throw new Error("parser reached");
+  });
   try {
     assert.equal((await enforceOoxmlPackagePolicy(await loadOoxmlZip(buffer), "docx", { legacyEquationPreviews: true }))?.occurrences.length, 1);
+    await assert.rejects(() => validateDocxPackage(buffer), /OLE/);
     const app = { vault: { readBinary: async () => buffer } } as unknown as App;
-    await assert.rejects(() => new DocxAdapter().open(app, {} as never), /OLE/);
-    await assert.rejects(() => renderDocx(buffer, {} as HTMLElement), /OLE/);
-    assert.equal(parseSpy.mock.callCount(), 0);
-    assert.equal(reads.filter((read) => read.path.includes("/embeddings/")).length, 0);
+    const opened = await new DocxAdapter().open(app, {} as never);
+    assert.deepEqual(new Uint8Array(opened), before);
+    assert.equal(opened, buffer);
+    await assert.rejects(() => withXmlSerializer(() => renderDocx(buffer, {} as HTMLElement)), /parser reached/);
+    assert.equal(parseSpy.mock.callCount(), 1);
+    assert.notEqual(parsedBuffers[0], buffer);
+    const prepared = await JSZip.loadAsync(parsedBuffers[0]);
+    assert.equal(Object.keys(prepared.files).some((name) => name.includes("/embeddings/")), false);
+    const document = await prepared.file("word/document.xml")!.async("string");
+    assert.doesNotMatch(document, /<w:object\b|OLEObject/i);
+    assert.equal(reads.filter((read) => /(?:^|\/)embeddings\//i.test(read.path)).length, 0);
     assert.ok(reads.some((read) => read.path === "word/_rels/document.xml.rels" && read.mode === "string"));
     assert.deepEqual(new Uint8Array(buffer), before);
   } finally { restore(); parseSpy.mock.restore(); }
@@ -89,11 +115,16 @@ void test("DOCX metadata-role collisions reject inventory opt-in and keep both r
 });
 
 void test("ordinary strict DOCX still reaches the parser", async () => {
-  const spy = mock.method(parser, "parseAsync", async () => { throw new Error("parser reached"); });
+  let parsedBuffer: ArrayBuffer | null = null;
+  const spy = mock.method(parser, "parseAsync", async (input: unknown) => {
+    parsedBuffer = input as ArrayBuffer;
+    throw new Error("parser reached");
+  });
   try {
     const buffer = await createLargeDocx(1);
-    await assert.rejects(() => renderDocx(buffer, {} as HTMLElement), /parser reached/);
+    await assert.rejects(() => withXmlSerializer(() => renderDocx(buffer, {} as HTMLElement)), /parser reached/);
     assert.equal(spy.mock.callCount(), 1);
-    assert.equal(spy.mock.calls[0].arguments[0], buffer);
+    assert.ok(parsedBuffer);
+    assert.notEqual(parsedBuffer, buffer);
   } finally { spy.mock.restore(); }
 });

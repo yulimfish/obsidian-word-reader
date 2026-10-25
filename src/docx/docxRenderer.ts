@@ -1,44 +1,37 @@
-// SECURITY: This module uses docx-preview for safe local document rendering.
-// No external scripts are loaded. All content comes from trusted local .docx files.
-import {
-  parseAsync,
-  renderDocument,
-  type Options,
-} from "docx-preview";
+import type {
+  BoundDocxRenderer,
+  DocxEngine,
+  DocxRenderOptions,
+  DocxRenderResult,
+} from "./docxEngineContract";
 
-import { annotateDocxHeadingLevels } from "./docxOutline";
-import { validateDocxPackage } from "./DocxAdapter";
+export type {
+  DocxEngine,
+  DocxEngineHost,
+  DocxRenderOptions,
+  DocxRenderResult,
+} from "./docxEngineContract";
 
-const DOCX_RENDER_OPTIONS: Partial<Options> = {
-  className: "docx",
-  inWrapper: true,
-  ignoreWidth: false,
-  ignoreHeight: false,
-  ignoreFonts: false,
-  breakPages: true,
-  // Blob URLs avoid duplicating large embedded images as base64 strings.
-  // DocxSession tracks and revokes every generated URL when the preview changes.
-  useBase64URL: false,
-  experimental: true,
-  trimXmlDeclaration: true,
-};
+export function createDocxRenderer(engine: DocxEngine): BoundDocxRenderer {
+  return (buffer, targetEl, options = {}) => engine.renderDocx(
+    buffer,
+    targetEl,
+    {
+      ownerDocument: targetEl.ownerDocument,
+      isCancelled: options.isCancelled ?? (() => false),
+      yieldControl: options.yieldControl ?? (async () => {}),
+    },
+  );
+}
 
 /**
- * Renders a .docx file buffer into the target DOM element.
- * SECURITY: Only creates structural HTML elements (div, span, img, etc.) for display.
- * No <script> elements are created or executed during rendering.
+ * Kept as a fail-closed compatibility entry point. Runtime callers must bind a
+ * verified engine with createDocxRenderer instead of importing the sidecar.
  */
 export async function renderDocx(
-  buffer: ArrayBuffer,
-  targetEl: HTMLElement,
-): Promise<void> {
-  await validateDocxPackage(buffer);
-  const document: unknown = await parseAsync(buffer, DOCX_RENDER_OPTIONS);
-  annotateDocxHeadingLevels(document);
-  await renderDocument(
-    document,
-    targetEl,
-    undefined,
-    DOCX_RENDER_OPTIONS,
-  );
+  _buffer: ArrayBuffer,
+  _targetEl: HTMLElement,
+  _options: DocxRenderOptions = {},
+): Promise<DocxRenderResult> {
+  throw new Error("DOCX renderer requires a verified engine binding.");
 }

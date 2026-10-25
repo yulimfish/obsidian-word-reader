@@ -20,8 +20,7 @@ import {
 } from "../desktopRuntime";
 import { createNoteFromDocx } from "../commands/createNoteFromDocx";
 import { openExternalDocx } from "../commands/openExternal";
-import { renderDocx } from "./docxRenderer";
-import { DOCX_HEADING_LEVEL_ATTRIBUTE } from "./docxOutline";
+import { createDocxRenderer } from "./docxRenderer";
 import type { WordReaderText } from "../i18n";
 import {
   classifyWordError,
@@ -34,7 +33,10 @@ import {
   type ReaderFileChange,
   type ReaderFileRevision,
 } from "../reader/fileRevision";
-import { formatReaderDiagnosticReport } from "../reader/diagnostics";
+import {
+  createReaderDiagnosticReport,
+  formatReaderDiagnosticReport,
+} from "../reader/diagnostics";
 import {
   createReaderPerformanceDiagnosticReport,
   ReaderPerformanceTracker,
@@ -79,6 +81,7 @@ import {
 import {
   docxFragmentToMarkdown,
 } from "./docxText";
+import type { PreviewIssue } from "../ooxml/previewTypes";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
@@ -93,7 +96,27 @@ const OUTLINE_CHUNK_SIZE = 50;
 const LONG_DOCUMENT_PAGE_THRESHOLD = 12;
 const SEARCH_HIGHLIGHT_NAME = "word-reader-search";
 const CURRENT_SEARCH_HIGHLIGHT_NAME = "word-reader-search-current";
+const DOCX_HEADING_LEVEL_ATTRIBUTE = "data-word-reader-heading-level";
 let nextSearchHighlightId = 0;
+
+function getDocxEngineIssues(error: unknown): readonly PreviewIssue[] | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const issues = (error as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) {
+    return null;
+  }
+  const validIssues = issues.filter((issue): issue is PreviewIssue =>
+    typeof issue === "object" &&
+    issue !== null &&
+    typeof (issue as PreviewIssue).partPath === "string" &&
+    typeof (issue as PreviewIssue).occurrenceId === "string" &&
+    (issue as PreviewIssue).code === "docx-engine-unavailable" &&
+    typeof (issue as PreviewIssue).detail === "string"
+  );
+  return validIssues.length > 0 ? validIssues : null;
+}
 
 declare const __DEV__: boolean;
 
@@ -689,6 +712,7 @@ export class DocxSession extends FileView implements ReaderSession {
     if (!this.buffer || !this.documentEl || !this.file) {
       return;
     }
+    const buffer = this.buffer;
 
     if (
       this.renderedDocumentKey === renderKey &&
@@ -713,14 +737,43 @@ export class DocxSession extends FileView implements ReaderSession {
 
     // SECURITY: Only structural DOM elements are created for safe document rendering.
     // No <script> elements are created or injected. All content comes from trusted local .docx files.
-    const renderTargetEl = activeDocument.createElement("div");
+    const ownerDocument = this.documentEl.doc;
+    const renderTargetEl = ownerDocument.createElement("div");
     renderTargetEl.className = "word-reader-render-buffer";
     let renderedBlobUrls = new Set<string>();
     let adoptedBlobUrls = false;
 
     try {
       const rendererStartedAt = performance.now();
-      await renderDocx(this.buffer, renderTargetEl);
+      const engine = await this.plugin.loadDocxEngine(buffer);
+      if (!this.isLoadCurrent(token)) {
+        return;
+      }
+      const renderDocx = createDocxRenderer(engine);
+      const renderResult = await renderDocx(buffer, renderTargetEl, {
+        isCancelled: () => !this.isLoadCurrent(token),
+        yieldControl: yieldToBrowser,
+      });
+      if (!this.isLoadCurrent(token)) {
+        return;
+      }
+      if (renderResult.issues.length > 0 && this.file) {
+        this.lastDiagnosticsText = formatReaderDiagnosticReport(
+          createReaderDiagnosticReport(
+            "docx",
+            "render",
+            {
+              name: this.file.name,
+              size: this.file.stat.size,
+              mtime: this.file.stat.mtime,
+            },
+            "Inert equation preview issues were found",
+            { issues: renderResult.issues },
+          ),
+        );
+      } else {
+        this.lastDiagnosticsText = null;
+      }
       const rendererDurationMs = performance.now() - rendererStartedAt;
       this.performanceTracker.recordTiming("parseMs", rendererDurationMs);
       this.performanceTracker.recordUninterruptibleDocxRender(
@@ -1286,12 +1339,25 @@ export class DocxSession extends FileView implements ReaderSession {
   private showError(error: unknown, file: TFile): void {
     const message = error instanceof Error ? error.message : String(error);
     const errorInfo = classifyWordError(message, this.text, this.buffer);
-    const diagnostics = createWordDiagnostics(errorInfo.kind, message, {
+    const diagnosticFile = {
       name: file.name,
       size: file.stat.size,
       mtime: file.stat.mtime,
-    });
-    const formattedDiagnostics = formatWordDiagnostics(diagnostics);
+    };
+    const engineIssues = getDocxEngineIssues(error);
+    const formattedDiagnostics = engineIssues
+      ? formatReaderDiagnosticReport(
+        createReaderDiagnosticReport(
+          "docx",
+          "error",
+          diagnosticFile,
+          "DOCX preview engine is unavailable",
+          { issues: engineIssues },
+        ),
+      )
+      : formatWordDiagnostics(
+        createWordDiagnostics(errorInfo.kind, message, diagnosticFile),
+      );
     this.clearRenderedDocument();
     if (!this.documentEl) {
       return;
