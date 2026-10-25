@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import JSZip from "jszip";
 
+import { createReadOnlyZipPlugin } from "./read-only-zip-plugin.mjs";
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDir = path.join(rootDir, ".zip-smoke-dist");
 const outputPath = path.join(outputDir, "reader.cjs");
@@ -22,14 +24,7 @@ try {
     format: "cjs",
     target: "node18",
     logLevel: "warning",
-    plugins: [{
-      name: "inflate-only-smoke",
-      setup(context) {
-        context.onResolve({ filter: /^pako$/ }, () => ({
-          path: path.join(rootDir, "node_modules", "pako", "lib", "inflate.js"),
-        }));
-      },
-    }],
+    plugins: [createReadOnlyZipPlugin(rootDir)],
   });
 
   const fixture = new JSZip();

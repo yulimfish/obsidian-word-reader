@@ -9,7 +9,7 @@ observed in an esbuild metafile for `src/main.ts`.
 | --- | --- | --- | --- | --- |
 | `@xmldom/xmldom` | `0.8.13` | MIT | yes | `npm:@xmldom/xmldom@0.8.13` |
 | `core-util-is` | `1.0.3` | MIT | runtime closure | `npm:core-util-is@1.0.3` |
-| `docx-preview` | `0.3.7` | Apache-2.0 | yes | `npm:docx-preview@0.3.7` |
+| `docx-preview` | `0.3.7` | Apache-2.0 | runtime closure | `npm:docx-preview@0.3.7` |
 | `immediate` | `3.0.6` | MIT | yes | `file:vendor/immediate` |
 | `inherits` | `2.0.4` | ISC | runtime closure | `npm:inherits@2.0.4` |
 | `isarray` | `1.0.0` | MIT | runtime closure | `npm:isarray@1.0.0` |
