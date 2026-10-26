@@ -102,12 +102,12 @@ expect(
 for (const file of [
   "README.md",
   "LICENSE",
-  "THIRD_PARTY_LICENSES.md",
+  "docs/THIRD_PARTY_LICENSES.md",
   "manifest.json",
   "versions.json",
-  "COMMUNITY_PLUGIN_CHECKLIST.md",
+  "docs/COMMUNITY_PLUGIN_CHECKLIST.md",
 ]) {
-  expect(hasFile(file), `${file} must exist in the repository root`);
+  expect(hasFile(file), `${file} must exist in the repository`);
 }
 
 if (tagName !== null) {
@@ -177,7 +177,7 @@ if (
 
 if (releaseMajor === 3 && releaseMinor >= 2) {
   expect(
-    hasFile("XLSM_COMPATIBILITY.md"),
+    hasFile("docs/XLSM_COMPATIBILITY.md"),
     "3.2+ releases must include the reviewed XLSM compatibility matrix",
   );
 

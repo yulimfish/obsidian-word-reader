@@ -8,7 +8,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const pkg = readJson("package.json");
 const lockfile = readJson("package-lock.json");
 const manifest = readJson("manifest.json");
-const licenseInventoryPath = path.join(rootDir, "THIRD_PARTY_LICENSES.md");
+const licenseInventoryPath = path.join(rootDir, "docs", "THIRD_PARTY_LICENSES.md");
 const maximumBundleBytes = 500 * 1024;
 const maximumReleaseBytes = 8 * 1024 * 1024;
 const releaseMajor = Number.parseInt(pkg.version.split(".")[0] ?? "", 10);
@@ -299,12 +299,12 @@ if (process.argv.includes("--write")) {
 } else {
   expect(
     fs.existsSync(licenseInventoryPath),
-    "THIRD_PARTY_LICENSES.md is missing; run npm run dependencies:licenses.",
+    "docs/THIRD_PARTY_LICENSES.md is missing; run npm run dependencies:licenses.",
   );
   if (fs.existsSync(licenseInventoryPath)) {
     expect(
       fs.readFileSync(licenseInventoryPath, "utf8") === inventory,
-      "THIRD_PARTY_LICENSES.md is stale; run npm run dependencies:licenses.",
+      "docs/THIRD_PARTY_LICENSES.md is stale; run npm run dependencies:licenses.",
     );
   }
 }
