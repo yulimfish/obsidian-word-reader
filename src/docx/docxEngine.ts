@@ -8,10 +8,14 @@ import {
 
 import { annotateDocxHeadingLevels } from "./docxOutline";
 import { prepareDocxPreviewPackage } from "./docxPreviewPackage";
+import { resolvePreviewMedia } from "../ooxml/previewMedia";
 import type {
+  DocxEngine,
   DocxEngineHost,
   DocxRenderResult,
 } from "./docxEngineContract";
+
+export type { DocxEngine, DocxEngineHost, DocxRenderResult };
 
 declare const __DOCX_PLUGIN_VERSION__: string;
 declare const __DOCX_BUILD_ID__: string;
@@ -44,6 +48,18 @@ function throwIfCancelled(host: DocxEngineHost): void {
     error.name = "AbortError";
     throw error;
   }
+}
+
+export async function resolvePreviewImage(
+  path: string,
+  bytes: Uint8Array,
+  options: { isCancelled?: () => boolean; yieldControl?: () => Promise<void> },
+) {
+  const result = await resolvePreviewMedia(path, bytes, {
+    isCancelled: options.isCancelled ?? (() => false),
+    yieldControl: options.yieldControl ?? (async () => {}),
+  });
+  return { bytes: result.bytes, mimeType: result.mimeType };
 }
 
 export async function renderDocx(

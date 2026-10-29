@@ -156,7 +156,7 @@ function writePlaceableHeader(bytes: Uint8Array): void {
 }
 
 export interface EquationFixtureOptions {
-  progId: "Equation.3" | "Equation.DSMT4";
+  progId: "Equation.3" | "Equation.DSMT4" | "";
   previewRelationship: {
     id: string;
     target: string;

@@ -15,7 +15,7 @@ const ENGINE_FILE = "docx-engine.cjs";
 const MANIFEST_FILE = "manifest.json";
 const STYLES_FILE = "styles.css";
 const MAIN_FILE = "main.js";
-const ENGINE_EXPORTS = ["abiVersion", "buildId", "pluginVersion", "renderDocx"];
+const ENGINE_EXPORTS = ["abiVersion", "buildId", "pluginVersion", "renderDocx", "resolvePreviewImage"];
 
 export interface DocxEnginePluginContext {
   readonly app: {
@@ -441,15 +441,22 @@ export function createDocxEngineLoader(
       getOwnDataValue(rawEngine, "abiVersion") !== expected.abiVersion ||
       getOwnDataValue(rawEngine, "pluginVersion") !== expected.pluginVersion ||
       getOwnDataValue(rawEngine, "buildId") !== expected.buildId ||
-      typeof getOwnDataValue(rawEngine, "renderDocx") !== "function"
+      typeof getOwnDataValue(rawEngine, "renderDocx") !== "function" ||
+      typeof getOwnDataValue(rawEngine, "resolvePreviewImage") !== "function"
     ) {
       fail("engine-mismatch", "The loaded DOCX engine exports do not match the expected ABI, version, and build.");
     }
     const render = getOwnDataValue(rawEngine, "renderDocx") as DocxEngine["renderDocx"];
+    const resolvePreviewImage = getOwnDataValue(rawEngine, "resolvePreviewImage") as DocxEngine["resolvePreviewImage"];
     const engine: DocxEngine = Object.freeze({
       abiVersion: expected.abiVersion,
       pluginVersion: expected.pluginVersion,
       buildId: expected.buildId,
+      resolvePreviewImage: (
+        path: string,
+        bytes: Uint8Array,
+        options: Parameters<DocxEngine["resolvePreviewImage"]>[2],
+      ) => resolvePreviewImage(path, bytes, options),
       renderDocx: async (
         buffer: ArrayBuffer,
         targetEl: HTMLElement,

@@ -58,6 +58,23 @@ async function fails(records: SyntheticMetafileRecord[], index: number, code: st
     error.recordOffset === parsed.records[index].offset && error.recordType === parsed.records[index].type);
 }
 
+void test("accepts zero-padded WMF scalar records emitted by equation editors", async () => {
+  const scene = await decodeWmfScene(parse([
+    record(0x102, words(1, 0)),
+  ]), options);
+  assert.deepEqual(scene.operations, []);
+});
+
+void test("rejects unverified mixed symbol runs, zero font sizes, and invalid brush colors", async () => {
+  const mixed = await decodeWmfScene(parse([font("MT Extra", 2), record(0x12d, words(0)), text([0x36, 0x61], [4, 5])]), options);
+  assert.equal(mixed.operations[0]?.kind, "text");
+  if (mixed.operations[0]?.kind === "text") assert.equal(mixed.operations[0].text, null);
+  assert.ok(mixed.warnings.some((warning) => warning.kind === "font-glyph-gap"));
+  await fails([font("Times New Roman", 161), record(0x12d, words(0)), text([0x80], [4])], 2, "unsupported-charset");
+  await fails([font("Symbol", 2, 0), record(0x12d, words(0)), text([0x3d], [4])], 2, "font-metrics-required");
+  await fails([record(0x2fc, Uint8Array.from([0, 0, 17, 34, 51, 2, 0, 0]))], 0, "unsupported-color");
+});
+
 void test("maps logical window coordinates and snapshots selected solid pen and current position", async () => {
   const scene = await decodeWmfScene(parse([
     record(0x20b, words(10, 20)), record(0x20c, words(80, 100)),

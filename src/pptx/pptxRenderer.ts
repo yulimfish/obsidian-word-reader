@@ -104,6 +104,7 @@ interface RenderContext {
   yieldControl: () => Promise<void>;
   timeSliceMs: number;
   lastYieldAt: number;
+  currentPartPath: string;
 }
 
 interface MutablePptxRenderDiagnostics {
@@ -187,6 +188,7 @@ export async function renderPptxSlide(
       options.yieldControl ?? createRenderYield(ownerDocument),
     timeSliceMs: Math.max(1, options.timeSliceMs ?? 8),
     lastYieldAt: startedAt,
+    currentPartPath: slideContext.slidePath,
   };
 
   try {
@@ -276,6 +278,7 @@ async function renderLayer(
   skipPlaceholders: boolean,
 ): Promise<void> {
   ensureRenderActive(context);
+  context.currentPartPath = layer.path;
   const shapeTree = firstDescendantNamed(
     layer.xmlDocument.documentElement,
     "spTree",
@@ -543,6 +546,34 @@ async function renderPicture(
   wrapperEl.appendChild(imageEl);
 }
 
+async function renderEquationPreview(
+  wrapperEl: HTMLElement,
+  previewPath: string | null,
+  context: RenderContext,
+): Promise<void> {
+  if (!previewPath) {
+    renderUnsupportedPlaceholder(wrapperEl, context, "Equation");
+    return;
+  }
+  const image = await context.pptx.getImage(previewPath, {
+    isCancelled: context.isCancelled,
+    yieldControl: context.yieldControl,
+  });
+  if (!image) {
+    renderUnsupportedPlaceholder(wrapperEl, context, "Equation");
+    return;
+  }
+  ensureRenderActive(context);
+  const url = URL.createObjectURL(createBlob(image.bytes, image.mimeType));
+  context.resources.add(url);
+  const imageEl = context.ownerDocument.createElement("img");
+  imageEl.className = "pptx-reader-image";
+  imageEl.src = url;
+  imageEl.alt = "Equation";
+  imageEl.decoding = "async";
+  wrapperEl.appendChild(imageEl);
+}
+
 async function renderGraphicFrame(
   wrapperEl: HTMLElement,
   shape: Element,
@@ -550,6 +581,14 @@ async function renderGraphicFrame(
 ): Promise<void> {
   const table = firstDescendantNamed(shape, "tbl");
   if (!table) {
+    const equation = context.pptx.previewInventory?.occurrences.find((occurrence) =>
+      occurrence.partPath === context.currentPartPath &&
+      occurrence.shapeId === attribute(firstChildNamed(firstChildNamed(shape, "nvGraphicFramePr"), "cNvPr"), "id"),
+    );
+    if (equation) {
+      await renderEquationPreview(wrapperEl, equation.previewPath, context);
+      return;
+    }
     const objectType = getGraphicFrameObjectType(shape);
     if (objectType === "Chart") {
       context.diagnostics.chartCount += 1;

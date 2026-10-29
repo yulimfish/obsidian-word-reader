@@ -1,6 +1,11 @@
 import { Platform } from "obsidian";
 import type { DocxEngineNodeRuntime } from "./docx/docxEngineLoader";
 
+type NodeRequire = (id: string) => unknown;
+// Obsidian injects this function; its plugin `module` deliberately has no `require` method.
+declare const require: NodeRequire;
+const nodeRequire: NodeRequire = (id) => require(id);
+
 export interface ElectronNativeImage {
   isEmpty?(): boolean;
 }
@@ -43,28 +48,29 @@ interface FileSystemPromises {
   writeFile(path: string, data: Uint8Array): Promise<void>;
 }
 
+/** Obsidian supplies CommonJS `require`; its plugin `module` has no `require` method. */
 export function getElectronModule(): ElectronModule {
   assertDesktop();
-  return module.require("electron") as ElectronModule;
+  return nodeRequire("electron") as ElectronModule;
 }
 
 export function getFileSystemPromises(): FileSystemPromises {
   assertDesktop();
-  return module.require("node:fs/promises") as FileSystemPromises;
+  return nodeRequire("node:fs/promises") as FileSystemPromises;
 }
 
 export function getDocxEngineNodeRuntime(): DocxEngineNodeRuntime {
   assertDesktop();
-  const fs = module.require("node:fs/promises") as DocxEngineNodeRuntime["fs"];
-  const path = module.require("node:path") as DocxEngineNodeRuntime["path"];
-  const crypto = module.require("node:crypto") as DocxEngineNodeRuntime["crypto"];
+  const fs = nodeRequire("node:fs/promises") as DocxEngineNodeRuntime["fs"];
+  const path = nodeRequire("node:path") as DocxEngineNodeRuntime["path"];
+  const crypto = nodeRequire("node:crypto") as DocxEngineNodeRuntime["crypto"];
   return {
     fs,
     path,
     crypto,
     moduleRequire: (canonicalVerifiedChild) => {
       assertDesktop();
-      return module.require(canonicalVerifiedChild) as unknown;
+      return nodeRequire(canonicalVerifiedChild);
     },
   };
 }

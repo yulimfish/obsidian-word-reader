@@ -1,6 +1,6 @@
 import type JSZip from "jszip";
 
-import { childElements, parseXml } from "../pptx/xml";
+import { childElements, parseXml, serializeXml } from "../pptx/xml";
 import {
   isCanonicalPreviewPath,
   readOoxmlPreviewMetadata,
@@ -156,7 +156,7 @@ function utf8(bytes: Uint8Array, path: string): string {
 }
 
 function serialize(document: Document): string {
-  return new XMLSerializer().serializeToString(document);
+  return serializeXml(document);
 }
 
 /** Admission stays private: only this T8 route opts into validated legacy equation previews. */

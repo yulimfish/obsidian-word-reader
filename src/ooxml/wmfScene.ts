@@ -1,20 +1,22 @@
 import type { MetafileRecord, MetafileRecordSet } from "./metafileRecords";
 import { MetafileDecodeError } from "./metafileScene";
 import type {
-  MetafileColor, MetafileLogicalFont, MetafilePoint, MetafileScene,
+  MetafileColor, MetafileLogicalFont, MetafilePathCommand, MetafilePoint, MetafileScene,
   MetafileSceneOperation, MetafileSceneWarning, MetafileStroke,
   MetafileTextOperation, MetafileTransform, MetafileViewBox,
 } from "./metafileScene";
 
 interface PenObject { readonly kind: "pen"; readonly stroke: MetafileStroke | null }
 interface FontObject { readonly kind: "font"; readonly family: string; readonly attributes: MetafileLogicalFont }
-type WmfObject = PenObject | FontObject;
+interface BrushObject { readonly kind: "brush"; readonly style: number; readonly color: MetafileColor }
+type WmfObject = PenObject | FontObject | BrushObject;
 interface State {
   position: MetafilePoint;
   origin: MetafilePoint;
   extent: MetafilePoint;
   pen: PenObject;
   font: FontObject | null;
+  brush: BrushObject | null;
   backgroundMode: "transparent" | "opaque";
   backgroundColor: MetafileColor;
   textColor: MetafileColor;
@@ -52,7 +54,7 @@ export async function decodeWmfScene(
   let state: State = {
     position: { x: 0, y: 0 }, origin: { x: bounds?.left ?? 0, y: bounds?.top ?? 0 },
     extent: { x: viewport.width, y: viewport.height },
-    pen: STOCK_PEN, font: null, backgroundMode: "opaque",
+    pen: STOCK_PEN, font: null, brush: null, backgroundMode: "opaque",
     backgroundColor: WHITE, textColor: BLACK, textAlign: 0,
   };
   const stack: State[] = [];
@@ -85,8 +87,8 @@ export async function decodeWmfScene(
         exact(record, 0);
         break;
       case 0x102: {
-        exact(record, 2);
-        const mode = view.getUint16(0, true);
+        exactPaddedWord(record, view, 4);
+        const mode = scalar(record, view);
         if (mode !== 1 && mode !== 2) fail(record, "unsupported-background-mode", `Background mode ${mode}`);
         state.backgroundMode = mode === 1 ? "transparent" : "opaque";
         break;
@@ -100,8 +102,8 @@ export async function decodeWmfScene(
         break;
       }
       case 0x12e: {
-        exact(record, 2);
-        const alignment = view.getUint16(0, true);
+        exactPaddedWord(record, view, 4);
+        const alignment = scalar(record, view);
         if ((alignment & ~0x11f) !== 0 || (alignment & 6) === 4 || (alignment & 0x18) === 0x10) {
           fail(record, "unsupported-text-alignment", `Invalid alignment flags 0x${alignment.toString(16)}`);
         }
@@ -139,6 +141,10 @@ export async function decodeWmfScene(
       case 0x2fa:
         create(record, readPen(record, view));
         break;
+      case 0x2fc:
+        exact(record, 8);
+        create(record, readBrush(record, view));
+        break;
       case 0x2fb:
         create(record, readFont(record, view));
         break;
@@ -148,6 +154,7 @@ export async function decodeWmfScene(
         const object = objects[handle];
         if (!object) fail(record, "invalid-selection", `Handle ${handle} is uncreated or deleted`);
         if (object.kind === "pen") state.pen = object;
+        else if (object.kind === "brush") state.brush = object;
         else state.font = object;
         break;
       }
@@ -157,7 +164,7 @@ export async function decodeWmfScene(
         const object = objects[handle];
         if (!object) fail(record, "invalid-delete", `Handle ${handle} is uncreated or deleted`);
          // GDI cannot delete an object selected in the current or saved DC.
-         if (state.pen === object || state.font === object || stack.some((saved) => saved.pen === object || saved.font === object)) {
+         if (state.pen === object || state.font === object || state.brush === object || stack.some((saved) => saved.pen === object || saved.font === object || saved.brush === object)) {
            fail(record, "invalid-delete", `Handle ${handle} remains selected in a current or saved state`);
          }
         objects[handle] = null;
@@ -175,7 +182,7 @@ export async function decodeWmfScene(
         const slot = target < 0 ? stack.length + target : target - 1;
         if (target === 0 || slot < 0 || slot >= stack.length) fail(record, "invalid-restore", `Invalid saved-state target ${target}`);
         const saved = stack[slot];
-        if ((saved.font && !objects.includes(saved.font)) || (saved.pen !== STOCK_PEN && !objects.includes(saved.pen))) {
+        if ((saved.font && !objects.includes(saved.font)) || (saved.brush && !objects.includes(saved.brush)) || (saved.pen !== STOCK_PEN && !objects.includes(saved.pen))) {
           fail(record, "invalid-selection", "Saved state refers to a deleted object");
         }
         state = { ...saved };
@@ -189,6 +196,23 @@ export async function decodeWmfScene(
         requiredFonts.add(decoded.operation.fontFamily);
         warnings.push(...decoded.warnings);
         if (decoded.nextPosition) state.position = decoded.nextPosition;
+        viewportEstablished = true;
+        break;
+      }
+      case 0x324: {
+        minimum(record, 6);
+        const count = view.getUint16(0, true);
+        exact(record, 2 + count * 4);
+        if (count < 2) fail(record, "invalid-record", "A polygon needs at least two points");
+        if (!state.brush) fail(record, "invalid-selection", "Polygon requires a selected brush");
+        const commands: MetafilePathCommand[] = [];
+        for (let index = 0; index < count; index++) {
+          const point = { x: view.getInt16(2 + index * 4, true), y: view.getInt16(4 + index * 4, true) };
+          commands.push({ type: index === 0 ? "moveTo" : "lineTo", point });
+        }
+        commands.push({ type: "closePath" });
+        checkEmission(record);
+        operations.push({ kind: "path", commands, fill: state.brush.color, stroke: state.pen.stroke, transform: transform(state, viewport) });
         viewportEstablished = true;
         break;
       }
@@ -217,11 +241,25 @@ function minimum(record: MetafileRecord, size: number): void {
 function exact(record: MetafileRecord, size: number): void {
   if (record.payload.byteLength !== size) fail(record, "invalid-record", `Expected ${size} payload bytes, received ${record.payload.byteLength}`);
 }
+function exactPaddedWord(record: MetafileRecord, view: DataView, size: number): void {
+  if (record.payload.byteLength !== size - 2 && record.payload.byteLength !== size) {
+    fail(record, "invalid-record", `Expected ${size - 2} or ${size} payload bytes, received ${record.payload.byteLength}`);
+  }
+  if (record.payload.byteLength === size && view.getUint16(size - 2, true) !== 0) {
+    fail(record, "invalid-record", "Extended scalar high word must be zero");
+  }
+}
+
+function scalar(record: MetafileRecord, view: DataView): number {
+  return view.getUint16(0, true);
+}
 function readYX(view: DataView): MetafilePoint {
   return { x: view.getInt16(2, true), y: view.getInt16(0, true) };
 }
 function readColor(record: MetafileRecord, view: DataView, offset: number): MetafileColor {
-  if (view.getUint8(offset + 3) !== 0) fail(record, "unsupported-color", "Palette-relative COLORREF is unsupported");
+  const highColor = view.getUint8(offset + 3);
+  if (highColor !== 0 && highColor !== 2) fail(record, "unsupported-color", "Palette-relative COLORREF is unsupported");
+  if (highColor === 2 && view.getUint16(offset, true) !== 0 && view.getUint16(offset, true) !== 255) fail(record, "unsupported-color", "Palette index COLORREF is unsupported");
   return { red: view.getUint8(offset), green: view.getUint8(offset + 1), blue: view.getUint8(offset + 2), alpha: 1 };
 }
 function transform(state: State, viewport: MetafileViewBox): MetafileTransform {
@@ -239,6 +277,17 @@ function readPen(record: MetafileRecord, view: DataView): PenObject {
   return { kind: "pen", stroke: style === 5 ? null : { color, width, lineCap: "round", lineJoin: "round", miterLimit: 10 } };
 }
 
+function readBrush(record: MetafileRecord, view: DataView): BrushObject {
+  const style = view.getUint16(0, true);
+  if (style !== 0 && style !== 1) fail(record, "unsupported-brush", `Brush style ${style} is unsupported`);
+  const highColor = view.getUint8(4);
+  if (highColor !== 0) fail(record, "unsupported-color", "Palette-relative COLORREF is unsupported");
+  return {
+    kind: "brush",
+    style,
+    color: { red: view.getUint8(2), green: view.getUint8(3), blue: view.getUint8(4), alpha: 1 },
+  };
+}
 function readFont(record: MetafileRecord, view: DataView): FontObject {
   exact(record, 50);
   const attributes: MetafileLogicalFont = {
@@ -267,13 +316,48 @@ function readFont(record: MetafileRecord, view: DataView): FontObject {
   return { kind: "font", family, attributes };
 }
 
-interface DecodedBytes { readonly text: string | null; readonly codePage: 42 | 1252 | 936; readonly byteLengths: readonly number[] }
-function decodeBytes(record: MetafileRecord, bytes: Uint8Array, charset: number): DecodedBytes {
-  // MS-WMF 2.3.3.5: ANSI=1252, GB2312=936, SYMBOL=42. Unknown/locale-
-  // dependent charsets have no guessed fallback. No third-party glyph table.
+interface DecodedBytes { readonly text: string | null; readonly codePage: 42 | 1252 | 1253 | 936; readonly byteLengths: readonly number[] }
+function decodeBytes(record: MetafileRecord, bytes: Uint8Array, charset: number, family?: string): DecodedBytes {
+  // Symbol and MT Extra use the font's private-use Unicode mapping.
+  if (charset === 2 && (family === "Symbol" || family === "MT Extra") && bytes.every((byte) =>
+    [0x2b, 0x2d, 0x3d, 0x3c, 0x3e, 0xa3, 0xa5, 0xb9, 0xc8, 0xd6, 0x7b, 0x7d].includes(byte),
+  )) {
+    const symbolMap: Record<number, string> = {
+      0x2b: "+", 0x2d: "−", 0x3d: "=", 0x3c: "<", 0x3e: ">",
+      0xa3: "≤", 0xa5: "∞", 0xb9: "≠", 0xc8: "∈", 0xd6: "÷",
+    };
+    return {
+      text: Array.from(bytes, (byte) => symbolMap[byte] ?? String.fromCharCode(byte)).join(""),
+      codePage: 42,
+      byteLengths: Array.from(bytes, () => 1),
+    };
+  }
+  if (charset === 2 && family === "MT Extra" && bytes.every((byte) =>
+    [0x36, 0x37, 0x38, 0x64, 0x7b, 0x7d].includes(byte),
+  )) {
+    const extraMap: Record<number, string> = { 0x36: "⎛", 0x37: "⎝", 0x38: "⎞", 0x64: "‖", 0x7b: "{", 0x7d: "}" };
+    return {
+      text: Array.from(bytes, (byte) => extraMap[byte] ?? "").join(""),
+      codePage: 42,
+      byteLengths: Array.from(bytes, () => 1),
+    };
+  }
+  // Unknown or locale-dependent charsets have no guessed fallback.
   if (charset === 2) return { text: null, codePage: 42, byteLengths: Array.from(bytes, () => 1) };
-  if (charset !== 0 && charset !== 134) fail(record, "unsupported-charset", `Charset ${charset} has no verified local decoder`);
+  if (charset !== 0 && charset !== 1 && charset !== 134 && charset !== 161) fail(record, "unsupported-charset", `Charset ${charset} has no verified local decoder`);
+  if (charset === 161) {
+    const greekMap: Record<number, string> = { 0xf6: "φ" };
+    if (bytes.some((byte) => byte < 0x20 || byte >= 0x7f && greekMap[byte] === undefined)) {
+      fail(record, "unsupported-charset", "Unverified Greek charset byte");
+    }
+    return {
+      text: Array.from(bytes, (byte) => greekMap[byte] ?? String.fromCharCode(byte)).join(""),
+      codePage: 1253,
+      byteLengths: Array.from(bytes, () => 1),
+    };
+  }
   const label = charset === 134 ? "gbk" : "windows-1252";
+  if (charset === 1 && bytes.some((byte) => byte >= 0x80) && family !== "Symbol") fail(record, "unsupported-charset", "Default charset non-ASCII text has no verified local decoder");
   let decoder: TextDecoder;
   try { decoder = new TextDecoder(label, { fatal: true }); }
   catch { fail(record, "unsupported-charset", `Runtime does not support ${label}`); }
@@ -306,7 +390,11 @@ function readText(record: MetafileRecord, view: DataView, state: State, viewport
   minimum(record, 8);
   const count = view.getInt16(4, true);
   if (count < 0 || count > MAX_TEXT_BYTES) fail(record, "invalid-text-length", `Text byte count ${count} exceeds ${MAX_TEXT_BYTES}`);
-  const flags = view.getUint16(6, true);
+  // Some equation writers store ETO flags in the high word of a 32-bit field.
+  const flags = record.payload.byteLength >= 10 && view.getUint16(6, true) === 0 &&
+    (view.getUint16(8, true) & ~0x86) === 0
+    ? 0
+    : view.getUint16(6, true);
   if (flags & 0x10) fail(record, "font-glyph-gap", `Glyph-index run requires exact font mapping (${state.font?.family ?? "unselected font"})`);
   if ((flags & ~0x86) !== 0) fail(record, "unsupported-text-options", `Unsupported text flags 0x${flags.toString(16)}`);
   const start = flags & 6 ? 16 : 8;
@@ -317,7 +405,7 @@ function readText(record: MetafileRecord, view: DataView, state: State, viewport
   const font = state.font;
   if (!font) fail(record, "font-metrics-required", "Text requires an explicitly selected font");
   const bytes = record.payload.subarray(start, start + count);
-  const decoded = decodeBytes(record, bytes, font.attributes.charset);
+  const decoded = decodeBytes(record, bytes, font.attributes.charset, font.family);
   const sourceAdvances = remaining === 0 ? undefined : Array.from({ length: count }, (_, index) => view.getInt16(end + index * 2, true));
   const advances = sourceAdvances ? combineAdvances(sourceAdvances, decoded.byteLengths) : undefined;
   let rect: MetafileViewBox | undefined;
@@ -330,7 +418,14 @@ function readText(record: MetafileRecord, view: DataView, state: State, viewport
   const point = state.textAlign & 1 ? state.position : readYX(view);
   const warnings: MetafileSceneWarning[] = [];
   if (decoded.text === null && count > 0) warnings.push({ kind: "font-glyph-gap", fontName: font.family, charset: font.attributes.charset, byteCodes: Array.from(bytes), recordOffset: record.offset, recordType: record.type });
-  if (font.attributes.height >= 0 || font.attributes.width !== 0 || sourceAdvances === undefined) {
+  const hasExplicitAdvances = sourceAdvances !== undefined;
+  const hasEquationTextLayout = font.attributes.charset === 2 && font.attributes.height !== 0 ||
+    (font.attributes.height < 0 && (state.textAlign & 1) === 0 && decoded.text !== null &&
+      decoded.text.length > 0 && font.attributes.outPrecision !== 0);
+  if (font.attributes.height === 0) fail(record, "font-metrics-required", "Text requires a non-zero font height");
+  if ((font.attributes.width !== 0 && !hasExplicitAdvances) ||
+    (font.attributes.height >= 0 && font.attributes.charset !== 2) ||
+    (!hasExplicitAdvances && !hasEquationTextLayout)) {
     warnings.push({ kind: "font-metrics-required", fontName: font.family, recordOffset: record.offset, recordType: record.type });
   }
   const style = {
@@ -344,7 +439,14 @@ function readText(record: MetafileRecord, view: DataView, state: State, viewport
   };
   const operation: MetafileTextOperation = decoded.text === null
     ? { ...style, text: null, encoding: "font-specific", codePage: 42 }
-    : { ...style, text: decoded.text, encoding: "unicode", codePage: decoded.codePage };
+    : {
+      ...style,
+      text: sourceAdvances !== undefined && (state.textAlign & 1) !== 0
+        ? decoded.text.split(" ").join(String.fromCharCode(160))
+        : decoded.text,
+      encoding: "unicode",
+      codePage: decoded.codePage,
+    };
   let nextPosition: MetafilePoint | null = null;
   if (state.textAlign & 1) {
     if (!advances || font.attributes.escapement !== 0 || font.attributes.orientation !== 0) {

@@ -16,6 +16,11 @@ export interface DocxEngineHost {
   readonly yieldControl: () => Promise<void>;
 }
 
+export interface PreviewImage {
+  readonly bytes: Uint8Array;
+  readonly mimeType: "image/svg+xml" | "image/png" | "image/jpeg" | "image/bmp";
+}
+
 export interface DocxEngine {
   readonly abiVersion: 1;
   readonly pluginVersion: string;
@@ -25,6 +30,11 @@ export interface DocxEngine {
     targetEl: HTMLElement,
     options: DocxEngineHost,
   ) => Promise<DocxRenderResult>;
+  readonly resolvePreviewImage: (
+    path: string,
+    bytes: Uint8Array,
+    options: DocxRenderOptions,
+  ) => Promise<PreviewImage>;
 }
 
 export type BoundDocxRenderer = (

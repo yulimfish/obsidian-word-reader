@@ -8,6 +8,7 @@ import {
   renderPptxSlide,
 } from "../src/pptx/pptxRenderer";
 import { createMinimalPptx } from "./pptxFixture";
+import { createEquationFixture, createSyntheticWmfFixture } from "./fidelity/fixtureBuilders";
 
 class MockClassList {
   readonly values = new Set<string>();
@@ -179,6 +180,33 @@ void test("renderPptxSlide cancels cooperatively and releases created resources"
     Object.defineProperty(URL, "createObjectURL", originalCreateObjectUrl);
     Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectUrl);
   }
+});
+
+void test("PPT equation preview conversion forwards cancellation into the media resolver", async () => {
+  const equationBuffer = await createEquationFixture("pptx", {
+    progId: "Equation.3",
+    previewRelationship: { id: "image", target: "../media/preview.png" },
+    previewBytes: Uint8Array.from([137, 80, 78, 71]),
+    opaqueEmbeddingBytes: new Uint8Array([1]),
+  });
+  const zip = await JSZip.loadAsync(equationBuffer);
+  zip.remove("ppt/media/preview.png");
+  zip.file("ppt/media/preview.wmf", createSyntheticWmfFixture([]));
+  zip.file("ppt/slides/_rels/slide1.xml.rels", (await zip.file("ppt/slides/_rels/slide1.xml.rels")!.async("string")).replace("preview.png", "preview.wmf"));
+  zip.file("[Content_Types].xml", (await zip.file("[Content_Types].xml")!.async("string")).replace('Extension="png" ContentType="image/png"', 'Extension="wmf" ContentType="image/x-wmf"'));
+  const pptx = await PptxPackage.load(await zip.generateAsync({ type: "arraybuffer" }), undefined, async (_path, _bytes, options) => {
+    let cancelled = false;
+    await options.yieldControl?.();
+    cancelled = options.isCancelled?.() ?? false;
+    if (cancelled) throw new Error("cancelled");
+    return { bytes: new Uint8Array([1]), mimeType: "image/svg+xml" };
+  });
+  const context = await pptx.getSlideContext(0);
+  let cancelled = false;
+  await assert.rejects(() => renderPptxSlide(pptx, context, new MockDocument() as unknown as Document, {
+    isCancelled: () => cancelled,
+    yieldControl: async () => { cancelled = true; },
+  }), /cancelled/);
 });
 
 void test("PptxPackage rejects embedded SVG resources", async () => {

@@ -76,6 +76,7 @@ function createEngine(
       counters.engineCalls += 1;
       return { inventory: { occurrences: [], issues: [] }, issues: [] };
     },
+    resolvePreviewImage: async (_path: string, bytes: Uint8Array) => ({ bytes, mimeType: "image/png" }),
     ...overrides,
   };
 }
@@ -190,7 +191,7 @@ async function expectLoaderCode(
   });
 }
 
-void test("DOCX engine loader validates and freezes the exact four-export ABI", async (t) => {
+void test("DOCX engine loader validates and freezes the exact five-export ABI", async (t) => {
   const fixture = await createFixture();
   t.after(fixture.cleanup);
 
@@ -198,7 +199,7 @@ void test("DOCX engine loader validates and freezes the exact four-export ABI", 
 
   assert.deepEqual(
     Object.keys(engine).sort(),
-    ["abiVersion", "buildId", "pluginVersion", "renderDocx"],
+    ["abiVersion", "buildId", "pluginVersion", "renderDocx", "resolvePreviewImage"],
   );
   assert.equal(engine.abiVersion, 1);
   assert.equal(engine.pluginVersion, PLUGIN_VERSION);

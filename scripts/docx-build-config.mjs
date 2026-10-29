@@ -17,9 +17,10 @@ export const DOCX_ARCHIVE_LIMIT_BYTES = 8_388_608;
 export const DOCX_ARCHIVE_PAYLOAD_LIMIT_BYTES = 8_388_192;
 export const DOCX_ARCHIVE_OVERHEAD_BYTES = 416;
 
+const ENGINE_EXPORTS = ["abiVersion", "buildId", "pluginVersion", "renderDocx", "resolvePreviewImage"];
+
 const WRITER_ROUTE_PATTERNS = Object.freeze([
   /(?<!un)(?<!de)compressWorker/,
-  /createWorkerFrom/,
   /FlateWorker\/Deflate/,
   /STORE compression/,
   /generateInternalStream/,
@@ -211,8 +212,13 @@ export function createDocxBuildConfig(options) {
   };
   const engine = {
     ...common,
+    format: "iife",
     entryPoints: [path.join(root, "src/docx/docxEngine.ts")],
     outfile: path.join(root, "dist/docx-engine.cjs"),
+    globalName: "__wordReaderDocxEngine",
+    footer: {
+      js: "exports.abiVersion = __wordReaderDocxEngine.abiVersion; exports.buildId = __wordReaderDocxEngine.buildId; exports.pluginVersion = __wordReaderDocxEngine.pluginVersion; exports.renderDocx = __wordReaderDocxEngine.renderDocx; exports.resolvePreviewImage = __wordReaderDocxEngine.resolvePreviewImage;",
+    },
     external: [],
     define: baseDefines,
     banner: {

@@ -1,4 +1,5 @@
 import type { App, TFile } from "obsidian";
+import type WordReaderPlugin from "../main";
 
 import {
   supportsReaderFile,
@@ -38,9 +39,16 @@ implements OfficeReaderAdapter<PptxPackage, PptxSlideMetadata> {
     return supportsReaderFile(this.extensions, file);
   }
 
-  async open(app: App, file: TFile): Promise<PptxPackage> {
+  async open(app: App, file: TFile, plugin?: WordReaderPlugin): Promise<PptxPackage> {
     const buffer = await app.vault.readBinary(file);
-    return PptxPackage.load(buffer);
+    if (!plugin) throw new Error("The Office preview engine is unavailable.");
+    const engine = await plugin.loadDocxEngine(buffer);
+    return PptxPackage.load(buffer, undefined, (path, bytes, options) =>
+      engine.resolvePreviewImage(path, bytes, {
+        isCancelled: options.isCancelled ?? (() => false),
+        yieldControl: options.yieldControl ?? (async () => {}),
+      }),
+    );
   }
 
   extractText(source: PptxSlideMetadata): ReaderTextExtraction {

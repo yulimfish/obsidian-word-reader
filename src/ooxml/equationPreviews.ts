@@ -194,7 +194,8 @@ export async function inspectEquationPreviews(zip: JSZip, format: "docx" | "pptx
       if (name !== "OLEObject" && name !== "oleObj") continue;
       if (element.namespaceURI !== (format === "docx" ? OFFICE : PPT)) fail("ole-namespace");
       const progId = element.getAttribute(format === "docx" ? "ProgID" : "progId");
-      if (progId !== "Equation.3" && progId !== "Equation.DSMT4") fail("ole-class");
+      const isPptOpaqueObject = format === "pptx" && progId === "";
+      if (progId !== "Equation.3" && progId !== "Equation.DSMT4" && !isPptOpaqueObject) fail("ole-class");
       const id = namespacedAttribute(element, "id", REL);
       const relationship = id ? rels.get(id) : undefined;
       if (!relationship || relationship.type !== `${REL}/oleObject` || relationship.external || !relationship.path || !zip.file(relationship.path)) fail("embedding-relationship");
@@ -232,6 +233,11 @@ export async function inspectEquationPreviews(zip: JSZip, format: "docx" | "pptx
       const sourceIndex = originalObjects.findIndex((item) => namespacedAttribute(item.element, "id", REL) === id);
       const source = originalObjects.splice(sourceIndex, 1)[0];
       if (!source) fail("source-id");
+      if (isPptOpaqueObject) {
+        accounted.add(embeddingPath);
+        continue;
+      }
+      if (progId !== "Equation.3" && progId !== "Equation.DSMT4") fail("ole-class");
       occurrences.push({ occurrenceId, partPath, shapeId, embeddingPath, previewPath, previewRelationshipId, progId, sourceElementPath: source.path });
       accounted.add(embeddingPath);
     }

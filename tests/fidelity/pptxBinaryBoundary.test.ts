@@ -77,6 +77,23 @@ for (const variant of ["earlier-metadata", "later-metadata", "self-reference", "
   }
 }
 
+void test("PPTX keeps a validated empty-type OLE object opaque without rejecting equation previews", async () => {
+  const buffer = await createEquationFixture("pptx", {
+    progId: "",
+    previewRelationship: { id: "image", target: "../media/preview.png" },
+    previewBytes: Uint8Array.from([137, 80, 78, 71]),
+    opaqueEmbeddingBytes: new TextEncoder().encode("opaque non-executable payload"),
+  });
+  const reads: EntryRead[] = [];
+  const restore = observeProductionReads(reads);
+  try {
+    const pptx = await PptxPackage.load(buffer);
+    assert.equal(pptx.previewInventory?.occurrences.length, 0);
+    await assert.rejects(() => pptx.getBinary("ppt/embeddings/oleObject1.bin"), PptxPackageError);
+    assert.equal(reads.filter((read) => read.path.includes("/embeddings/")).length, 0);
+  } finally { restore(); }
+});
+
 void test("PPTX binary boundary allows validated images and denies direct, cached and alias payload reads", async () => {
   const reads: EntryRead[] = [];
   const restore = observeProductionReads(reads);

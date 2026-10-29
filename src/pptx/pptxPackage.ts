@@ -22,6 +22,7 @@ import {
 } from "./pptxMetadata";
 import { LruCache } from "../reader/lruCache";
 import { collectValidatedPptxImagePaths, isCanonicalPreviewPath, readOoxmlPreviewMetadata, type OoxmlPreviewMetadata } from "../ooxml/equationPreviews";
+import type { DocxEngine } from "../docx/docxEngineContract";
 import type { PreviewInventory } from "../ooxml/previewTypes";
 
 const DEFAULT_SLIDE_WIDTH = 12_192_000;
@@ -134,6 +135,7 @@ export class PptxPackage {
     previewInventory: PreviewInventory | null,
     imagePaths: ReadonlySet<string>,
     metadata: OoxmlPreviewMetadata,
+    private readonly resolveImage?: DocxEngine["resolvePreviewImage"],
   ) {
     const slideSize = descendantsNamed(
       presentation.documentElement,
@@ -180,6 +182,7 @@ export class PptxPackage {
   static async load(
     buffer: ArrayBuffer,
     limits: ZipSafetyLimits = DEFAULT_PPTX_ZIP_LIMITS,
+    resolveImage?: DocxEngine["resolvePreviewImage"],
   ): Promise<PptxPackage> {
     const zipSummary = validateZipSafety(buffer, limits);
     let zip: JSZip;
@@ -224,6 +227,7 @@ export class PptxPackage {
       previewInventory,
       imagePaths,
       metadata,
+      resolveImage,
     );
     if (pptx.slidePaths.length === 0) {
       throw new PptxPackageError(
@@ -386,6 +390,19 @@ export class PptxPackage {
       const entry = this.zip.file(path);
       return entry ? entry.async("uint8array") : Promise.resolve(null);
     });
+  }
+
+  async getImage(
+    path: string,
+    options: { isCancelled?: () => boolean; yieldControl?: () => Promise<void> } = {},
+  ): Promise<{ bytes: Uint8Array; mimeType: string } | null> {
+    const bytes = await this.getBinary(path);
+    if (!bytes) return null;
+    if (this.getImageMimeType(path)) {
+      return { bytes, mimeType: this.getImageMimeType(path)! };
+    }
+    if (!this.resolveImage) return null;
+    return this.resolveImage(path, bytes, options);
   }
 
   getCacheDiagnostics(): PptxCacheDiagnostics {

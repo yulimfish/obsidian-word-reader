@@ -1,4 +1,4 @@
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 export function parseXml(xml: string, path: string): Document {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) {
@@ -21,6 +21,10 @@ export function parseXml(xml: string, path: string): Document {
     throw new Error(`Invalid XML in ${path}: ${errors[0] ?? "missing root element"}`);
   }
   return document;
+}
+
+export function serializeXml(document: Document): string {
+  return new XMLSerializer().serializeToString(document);
 }
 
 export function childElements(element: Element): Element[] {

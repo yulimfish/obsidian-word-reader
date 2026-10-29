@@ -594,7 +594,7 @@ void test("supports only exact left TA_BASELINE alignment with optional RTL read
     assert.equal(rendered.getAttribute("direction"), direction);
   }
   for (const [textAlign, direction] of [
-    [0, "ltr"], [8, "ltr"], [2, "ltr"], [6, "ltr"], [0x118, "ltr"], [0x19, "ltr"],
+    [0, "ltr"], [8, "ltr"], [2, "ltr"], [6, "ltr"], [0x118, "ltr"], [0x1a, "ltr"],
   ] as const) {
     serializeFails(scene([{ ...textRun("AB", [3, 7]), textAlign, direction }]), "unsupported-text", 0);
   }

@@ -871,7 +871,9 @@ function validateTextOperation(
     // retains isolated internal spaces, but trims/collapses boundary or repeated
     // spaces and normalizes XML control whitespace before applying x positions.
     // Other Unicode whitespace is outside this proven one-to-one subset.
-    if (/^ | $| {2}|[^\S ]/u.test(text)) {
+    const hasPositionedEquationWhitespace = object.sourceAdvances !== undefined &&
+      object.textAlign === 0x19 && text !== null && !/[^\S ]/.test(text.split(String.fromCharCode(160)).join(""));
+    if (/^ | $| {2}|[^\S  ]/u.test(text) && !hasPositionedEquationWhitespace) {
       fail("unsupported-text", operationIndex, "Text whitespace has no proven one-to-one SVG glyph mapping.");
     }
   }
@@ -897,7 +899,7 @@ function validateTextOperation(
   }
   const textAlign = object.textAlign === undefined ? 0 : object.textAlign;
   const textOptions = object.textOptions === undefined ? 0 : object.textOptions;
-  if (textAlign !== 0x18 && !(textAlign === 0x118 && object.direction === "rtl")) {
+  if (textAlign !== 0x18 && textAlign !== 0x19 && !(textAlign === 0x118 && object.direction === "rtl")) {
     fail("unsupported-text", operationIndex, `Text alignment 0x${textAlign.toString(16)} requires unsupported horizontal or vertical positioning.`);
   }
   if ((textOptions & ~0x86) !== 0) {
